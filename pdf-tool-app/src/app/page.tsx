@@ -4,20 +4,16 @@ import { useState, useEffect } from "react";
 import { PdfStudio } from "@/components/pdf-studio";
 
 const PHRASES = [
-  "edit",
-  "delete pages",
-  "change text",
-  "merge PDFs",
-  "split documents",
-  "rotate pages",
-  "add page numbers",
-  "add signatures",
-  "convert to Word",
-  "convert to Excel",
-  "compress files",
   "work with PDFs",
+  "edit your documents",
+  "delete unwanted pages",
+  "change text",
+  "merge files",
+  "split documents",
+  "add page numbers",
   "work with Word",
-  "work with Excel"
+  "work with Excel",
+  "convert your files"
 ];
 
 function TypewriterEffect() {
@@ -45,8 +41,9 @@ function TypewriterEffect() {
   }, [subIndex, index, reverse]);
 
   return (
-    <span className="text-xl md:text-2xl text-blue-200/90 font-sans font-light tracking-wide">
+    <span className="text-xl md:text-2xl text-blue-200/90 font-sans font-light tracking-wide flex items-center justify-center">
       {PHRASES[index].substring(0, subIndex)}
+      <span className="w-[1px] h-[1em] bg-blue-200/90 ml-[2px] animate-[pulse_1s_ease-in-out_infinite]"></span>
     </span>
   );
 }
