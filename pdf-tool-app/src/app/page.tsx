@@ -1,7 +1,55 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PdfStudio } from "@/components/pdf-studio";
+
+const PHRASES = [
+  "edit",
+  "delete pages",
+  "change text",
+  "merge PDFs",
+  "split documents",
+  "rotate pages",
+  "add page numbers",
+  "add signatures",
+  "convert to Word",
+  "convert to Excel",
+  "compress files",
+  "work with PDFs",
+  "work with Word",
+  "work with Excel"
+];
+
+function TypewriterEffect() {
+  const [index, setIndex] = useState(0);
+  const [subIndex, setSubIndex] = useState(0);
+  const [reverse, setReverse] = useState(false);
+
+  useEffect(() => {
+    if (subIndex === PHRASES[index].length + 1 && !reverse) {
+      const timeout = setTimeout(() => setReverse(true), 2000);
+      return () => clearTimeout(timeout);
+    }
+    
+    if (subIndex === 0 && reverse) {
+      setReverse(false);
+      setIndex((prev) => (prev + 1) % PHRASES.length);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setSubIndex((prev) => prev + (reverse ? -1 : 1));
+    }, reverse ? 30 : 60);
+
+    return () => clearTimeout(timeout);
+  }, [subIndex, index, reverse]);
+
+  return (
+    <span className="text-xl md:text-2xl text-blue-200/90 font-sans font-light tracking-wide">
+      {PHRASES[index].substring(0, subIndex)}
+    </span>
+  );
+}
 
 export default function Home() {
   const [showWorkspace, setShowWorkspace] = useState(false);
@@ -36,9 +84,9 @@ export default function Home() {
           <h1 className="font-display text-5xl md:text-7xl lg:text-[5.5rem] font-medium leading-tight text-white mb-6 max-w-4xl tracking-tight">
             Get more done with your files.
           </h1>
-          <p className="text-xl md:text-2xl text-blue-100 mb-16 max-w-2xl font-light">
-            LayahTools helps you work with documents and files quickly without unnecessary complexity.
-          </p>
+          <div className="h-8 mb-16 flex items-center justify-center">
+            <TypewriterEffect />
+          </div>
 
           {/* INTEGRATED AI PROMPT */}
           <div className="w-full max-w-2xl bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-white/20 transition-all hover:shadow-blue-900/20">
