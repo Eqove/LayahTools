@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Instrument_Serif } from "next/font/google";
 import "./globals.css";
+import { AppProvider } from "@/lib/state/app-state";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 const instrumentSerif = Instrument_Serif({ 
@@ -21,8 +22,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geist.variable} ${instrumentSerif.variable}`}>
-      <body className="font-sans bg-white text-slate-900 min-h-screen flex flex-col">
-        {children}
+      <body className="font-sans bg-[#f8f9fa] text-slate-900 min-h-screen flex flex-col">
+        <AppProvider>
+          {children}
+        </AppProvider>
       </body>
     </html>
   );
