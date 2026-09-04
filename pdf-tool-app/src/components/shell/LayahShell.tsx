@@ -4,7 +4,7 @@ import { useApp } from "@/lib/state/app-state";
 import { EntryState } from "./EntryState";
 import { FormatSwitcher } from "./FormatSwitcher";
 import { WorkspaceShell } from "./WorkspaceShell";
-import { PdfWorkspace } from "@/components/workspace/PdfWorkspace";
+import { Workspace } from "@/components/workspace/Workspace";
 
 export function LayahShell() {
   const { isWorkspaceActive } = useApp();
@@ -12,7 +12,7 @@ export function LayahShell() {
   if (isWorkspaceActive) {
     return (
       <div className="w-full h-screen overflow-hidden bg-slate-50 animate-in fade-in duration-300">
-        <PdfWorkspace />
+        <Workspace />
       </div>
     );
   }

@@ -6,6 +6,12 @@ import { useApp } from "@/lib/state/app-state";
 import { CAPABILITY_REGISTRY } from "@/lib/capabilities/registry";
 import { WorkspaceHeader } from "@/components/shell/WorkspaceHeader";
 import { CommandBar } from "@/components/shell/CommandBar";
+import dynamic from 'next/dynamic';
+
+const PdfViewer = dynamic(
+  () => import('@/components/pdf/viewer/PdfViewer').then((mod) => mod.PdfViewer),
+  { ssr: false, loading: () => <div className="p-8 text-center text-slate-500">Initializing viewer...</div> }
+);
 import { downloadBytes } from "@/lib/pdf/download";
 import {
   addPageNumbers,
@@ -48,8 +54,8 @@ const INITIAL_FORM: FormState = {
   blankHeight: "842",
 };
 
-export function PdfWorkspace() {
-  const { activeCapabilityId, setActiveCapabilityId } = useApp();
+export function Workspace() {
+  const { activeCapabilityId, setActiveCapabilityId, activeFormat, setWorkspaceActive } = useApp();
   const [files, setFiles] = useState<File[]>([]);
   const [results, setResults] = useState<StudioResult[]>([]);
   const [status, setStatus] = useState("");
@@ -197,7 +203,7 @@ export function PdfWorkspace() {
 
   return (
     <div className="h-full flex flex-col bg-slate-50 relative">
-      <WorkspaceHeader />
+      <WorkspaceHeader goHome={() => setWorkspaceActive(false)} />
       
       <div className="flex flex-1 overflow-hidden">
         
@@ -239,81 +245,103 @@ export function PdfWorkspace() {
 
         {/* CENTER: DOCUMENT CANVAS */}
         <main className="flex-1 flex flex-col min-w-0 bg-[#f0f2f5] relative">
-          <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center">
+          <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center">
             
-            <div className="w-full max-w-3xl bg-white shadow-sm border border-slate-200 rounded-xl overflow-hidden min-h-[500px] flex flex-col">
-              {/* Context Header */}
-              <div className="border-b border-slate-100 p-6 bg-white flex justify-between items-start">
-                <div>
-                  <h2 className="text-2xl font-display text-slate-900 mb-1">{capability?.name}</h2>
-                  <p className="text-sm text-slate-500">{capability?.summary}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={runTool} 
-                    disabled={isPending || (!files.length && activeTool !== "blank")}
-                    className="bg-layah-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                  >
-                    {isPending ? "Processing..." : "Run Tool"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Status Banner */}
-              {status && (
-                <div className={clsx(
-                  "px-6 py-3 text-sm font-medium border-b",
-                  statusTone === "error" ? "bg-red-50 text-red-700 border-red-100" :
-                  statusTone === "success" ? "bg-green-50 text-green-700 border-green-100" :
-                  "bg-blue-50 text-layah-primary border-blue-100"
-                )}>
-                  {status}
-                </div>
-              )}
-
-              {/* Document Surface / Dropzone */}
-              <div className="flex-1 p-8 bg-slate-50/50 flex flex-col items-center justify-center relative">
-                
-                {/* File Input (Hidden) */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept="application/pdf"
-                  multiple={acceptsMultiple}
-                  onChange={(event) => handleFiles(event.target.files)}
-                />
-
-                {/* Empty State / Dropzone */}
-                {!files.length && activeTool !== "blank" && (
-                  <div className="text-center">
-                    <div className="w-16 h-16 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-slate-400">
-                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    </div>
-                    <p className="text-slate-900 font-medium text-lg mb-1">Drop a file here</p>
-                    <p className="text-slate-500 text-sm mb-6">or</p>
-                    <button onClick={openFilePicker} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
-                      Choose a file
+            {activeFormat === "pdf" ? (
+              <div className="w-full h-full flex flex-col relative">
+                {/* Context Header */}
+                <div className="border-b border-slate-200 p-5 bg-white flex justify-between items-start shrink-0 rounded-t-xl">
+                  <div>
+                    <h2 className="text-xl font-display text-slate-900 mb-1">{capability?.name}</h2>
+                    <p className="text-sm text-slate-500">{capability?.summary}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={runTool} 
+                      disabled={isPending || (!files.length && activeTool !== "blank")}
+                      className="bg-layah-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    >
+                      {isPending ? "Processing..." : "Run Tool"}
                     </button>
+                  </div>
+                </div>
+
+                {/* Status Banner */}
+                {status && (
+                  <div className={clsx(
+                    "px-6 py-2.5 text-sm font-medium shrink-0",
+                    statusTone === "error" ? "bg-red-50 text-red-700 border-b border-red-100" :
+                    statusTone === "success" ? "bg-green-50 text-green-700 border-b border-green-100" :
+                    "bg-blue-50 text-layah-primary border-b border-blue-100"
+                  )}>
+                    {status}
                   </div>
                 )}
 
-                {/* Configuration Panel (Only shows if files exist or if it's the blank tool) */}
-                {(files.length > 0 || activeTool === "blank") && (
-                  <div className="w-full max-w-lg bg-white p-6 rounded-xl border border-slate-200 shadow-sm relative z-10 mt-8">
-                    <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wider">Configuration</h3>
+                {/* Configuration Panel Floating Overlay (Only if active tool needs fields) */}
+                {(files.length > 0 || activeTool === "blank") && activeTool !== "merge" && (
+                  <div className="absolute top-24 right-6 w-80 bg-white/95 backdrop-blur shadow-xl p-5 rounded-xl border border-slate-200 z-20">
+                    <h3 className="text-xs font-bold text-slate-900 mb-3 uppercase tracking-wider">Configuration</h3>
                     <ToolFields activeTool={activeTool} form={form} updateForm={updateForm} />
                   </div>
                 )}
 
-                {/* Document Placeholder visual when files are loaded */}
-                {files.length > 0 && activeTool !== "blank" && (
-                  <div className="absolute inset-0 m-12 border-2 border-dashed border-slate-200 rounded-lg pointer-events-none opacity-50 flex items-center justify-center">
-                    <span className="text-slate-400 font-medium">Future PDF.js Canvas Area</span>
-                  </div>
-                )}
+                {/* Document Surface / Viewer */}
+                <div className="flex-1 relative flex flex-col min-h-0 bg-[#e4e7ec] overflow-hidden">
+                  
+                  {/* File Input (Hidden) */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept="application/pdf"
+                    multiple={acceptsMultiple}
+                    onChange={(event) => handleFiles(event.target.files)}
+                  />
+
+                  {/* Empty State / Dropzone */}
+                  {!files.length && activeTool !== "blank" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <div className="w-16 h-16 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-slate-400">
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      </div>
+                      <p className="text-slate-900 font-medium text-lg mb-1">Drop a file here</p>
+                      <p className="text-slate-500 text-sm mb-6">or</p>
+                      <button onClick={openFilePicker} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
+                        Choose a file
+                      </button>
+                    </div>
+                  )}
+
+                  {/* PDF Viewer */}
+                  {files.length > 0 && activeTool !== "blank" && (
+                     <PdfViewer file={files[0]} />
+                  )}
+                  
+                  {/* Blank PDF View Placeholder */}
+                  {activeTool === "blank" && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div 
+                        className="bg-white shadow-md border border-slate-200" 
+                        style={{ width: `${form.blankWidth}px`, height: `${form.blankHeight}px`, transform: 'scale(0.7)' }}
+                      >
+                         <div className="p-12 text-slate-400 text-center font-medium opacity-50">
+                            Blank PDF Preview
+                         </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="text-center w-full max-w-lg mx-auto py-24 opacity-60">
+                <div className="w-16 h-16 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-6 text-slate-400">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                </div>
+                <h2 className="text-3xl font-display text-slate-800 mb-2 capitalize">{activeFormat} Workspace</h2>
+                <p className="text-slate-500 mb-4">{activeFormat} tools are coming into this workspace.</p>
+              </div>
+            )}
             
             {/* Spacing for command bar */}
             <div className="h-24"></div>

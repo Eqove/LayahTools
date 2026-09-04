@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
 export type FormatContextId = "pdf" | "word" | "excel" | "ppt" | "images" | null;
 
@@ -23,11 +23,34 @@ export interface AppContextType extends AppState {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [isWorkspaceActive, setWorkspaceActive] = useState<boolean>(false);
+  const [isWorkspaceActive, setWorkspaceActiveInternal] = useState<boolean>(false);
   const [activeFormat, setActiveFormat] = useState<FormatContextId>("pdf");
   const [activeCapabilityId, setActiveCapabilityId] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [commandInput, setCommandInput] = useState<string>("");
+
+  useEffect(() => {
+    // Check initial hash
+    if (window.location.hash === "#workspace") {
+      setWorkspaceActiveInternal(true);
+    }
+
+    const handlePopState = () => {
+      setWorkspaceActiveInternal(window.location.hash === "#workspace");
+    };
+    
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const setWorkspaceActive = (active: boolean) => {
+    setWorkspaceActiveInternal(active);
+    if (active && window.location.hash !== "#workspace") {
+      window.history.pushState(null, "", "#workspace");
+    } else if (!active && window.location.hash === "#workspace") {
+      window.history.pushState(null, "", window.location.pathname + window.location.search);
+    }
+  };
 
   const value: AppContextType = {
     isWorkspaceActive,

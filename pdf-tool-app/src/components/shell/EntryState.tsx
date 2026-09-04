@@ -57,7 +57,7 @@ export function EntryState() {
       }}
     >
       <nav className="w-full max-w-7xl mx-auto px-6 py-6 flex justify-between items-center text-white">
-        <div className="font-bold text-xl tracking-tight">layah.tools</div>
+        <div className="font-sans font-bold text-xl tracking-tight">layah.tools</div>
         <div className="flex gap-8 items-center text-sm font-medium">
           <a href="#workspace" className="opacity-90 hover:opacity-100 transition-opacity">PDF</a>
           <span className="opacity-60 cursor-not-allowed hidden md:inline">Word</span>
