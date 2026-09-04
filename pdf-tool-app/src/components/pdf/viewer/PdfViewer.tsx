@@ -11,9 +11,19 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 interface PdfViewerProps {
   file: File | null;
+  renderPageOverlay?: (pageIndex: number) => React.ReactNode;
+  viewMode?: "scroll" | "grid";
+  pageOrder?: number[];
+  onPageReorder?: (newOrder: number[]) => void;
 }
 
-export function PdfViewer({ file }: PdfViewerProps) {
+export function PdfViewer({ 
+  file, 
+  renderPageOverlay, 
+  viewMode = "scroll", 
+  pageOrder, 
+  onPageReorder 
+}: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [zoom, setZoom] = useState<number>(1);
@@ -27,12 +37,47 @@ export function PdfViewer({ file }: PdfViewerProps) {
     setError(null);
   }, [file]);
 
+  const [internalPageOrder, setInternalPageOrder] = useState<number[]>([]);
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages);
     setCurrentPage(1);
     setError(null);
+    if (!pageOrder || pageOrder.length !== numPages) {
+      const order = Array.from({ length: numPages }, (_, i) => i);
+      setInternalPageOrder(order);
+      if (onPageReorder) onPageReorder(order);
+    } else {
+      setInternalPageOrder(pageOrder);
+    }
   }
 
+  useEffect(() => {
+    if (pageOrder) {
+      setInternalPageOrder(pageOrder);
+    }
+  }, [pageOrder]);
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIndex) return;
+
+    const newOrder = [...internalPageOrder];
+    const [draggedItem] = newOrder.splice(draggedIdx, 1);
+    newOrder.splice(targetIndex, 0, draggedItem);
+    
+    setInternalPageOrder(newOrder);
+    if (onPageReorder) onPageReorder(newOrder);
+    setDraggedIdx(null);
+  };
+
+  // Tracking scroll and page view ...
   function onDocumentLoadError(error: Error) {
     console.error("Failed to load PDF", error);
     setError("Failed to load the PDF document. It may be corrupted or password protected.");
@@ -134,24 +179,46 @@ export function PdfViewer({ file }: PdfViewerProps) {
                 <span className="animate-pulse">Loading PDF...</span>
               </div>
             }
-            className="flex flex-col items-center gap-6 pb-24"
-          >
-            {Array.from(new Array(numPages), (el, index) => (
-              <div 
-                key={`page_${index + 1}`} 
-                data-page-number={index + 1}
-                className="bg-white shadow-md transition-transform"
-              >
-                <Page
-                  pageNumber={index + 1}
-                  scale={zoom}
-                  renderTextLayer={true}
-                  renderAnnotationLayer={true}
-                  loading={<div className="bg-white animate-pulse" style={{ width: 600 * zoom, height: 800 * zoom }} />}
-                  className="max-w-full"
-                />
-              </div>
-            ))}
+            className={viewMode === "grid" 
+                ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 pb-24 max-w-5xl mx-auto"
+                : "flex flex-col items-center gap-6 pb-24"}
+            >
+              {(internalPageOrder.length > 0 ? internalPageOrder : Array.from({ length: numPages }, (_, i) => i)).map((originalIndex, currentIndex) => {
+                const pageNum = originalIndex + 1;
+                return (
+                  <div 
+                    key={`page_render_${originalIndex}_${currentIndex}`} 
+                    data-page-number={pageNum}
+                    className={`bg-white shadow-md transition-transform relative ${
+                      viewMode === "grid" 
+                        ? "cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-blue-400"
+                        : ""
+                    } ${draggedIdx === currentIndex ? "opacity-50" : ""}`}
+                    draggable={viewMode === "grid"}
+                    onDragStart={(e) => viewMode === "grid" && handleDragStart(e, currentIndex)}
+                    onDragOver={(e) => {
+                      if (viewMode === "grid") e.preventDefault();
+                    }}
+                    onDrop={(e) => viewMode === "grid" && handleDrop(e, currentIndex)}
+                  >
+                    {viewMode === "grid" && (
+                      <div className="absolute top-2 left-2 bg-black/60 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center z-10 pointer-events-none">
+                        {currentIndex + 1}
+                      </div>
+                    )}
+                    <Page
+                      pageNumber={pageNum}
+                      scale={viewMode === "grid" ? 0.3 : zoom}
+                      renderTextLayer={viewMode !== "grid"}
+                      renderAnnotationLayer={viewMode !== "grid"}
+                      loading={<div className="bg-white animate-pulse" style={{ width: (viewMode === "grid" ? 180 : 600 * zoom), height: (viewMode === "grid" ? 240 : 800 * zoom) }} />}
+                      className="max-w-full relative"
+                    >
+                      {renderPageOverlay && renderPageOverlay(originalIndex)}
+                    </Page>
+                  </div>
+                );
+              })}
           </Document>
         )}
       </div>

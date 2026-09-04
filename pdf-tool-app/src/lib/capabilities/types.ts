@@ -1,19 +1,20 @@
 export type CapabilityCategory = "organize" | "understand" | "convert" | "secure" | "create";
 
 export interface Capability {
-  id: string; // e.g., "pdf.merge"
+  id: string;
   name: string;
   category: CapabilityCategory;
-  inputFormats: string[]; // e.g., ["pdf"], empty array implies no input required (like blank pdf)
-  outputFormats: string[]; // e.g., ["pdf", "docx"]
-  processingMode: "client" | "server" | "worker";
-  destructive: boolean;
+  supportedInputTypes: string[];
+  supportedOutputTypes: string[];
+  configurationSchema?: Record<string, any>;
+  processingEngine?: string;
+  clientServerSuitability?: "client-only" | "server-only" | "isomorphic";
+  workerRequirement?: "none" | "optional" | "required";
+  isDestructive: boolean;
   supportsPreview: boolean;
-  supportsBatch: boolean;
-  supportsAI: boolean;
+  aiActionSchema?: Record<string, any>;
   
-  // Legacy UI fields preserved to avoid breaking PdfStudio temporarily
+  // Legacy fields for existing UI compatibility
   summary: string;
-  acceptsMultiple: boolean;
-  primaryLabel: string;
+  supportsBatch: boolean;
 }

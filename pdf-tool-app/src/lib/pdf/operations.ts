@@ -195,6 +195,105 @@ export async function createBlankPdf(options: {
   ];
 }
 
+export async function rearrangePdf(file: File, pageOrder: number[]) {
+  const source = await PDFDocument.load(await file.arrayBuffer());
+  const target = await PDFDocument.create();
+  
+  // copyPages takes an array of indices and returns an array of copied pages
+  const copiedPages = await target.copyPages(source, source.getPageIndices());
+  
+  for (const index of pageOrder) {
+    if (index >= 0 && index < copiedPages.length) {
+      target.addPage(copiedPages[index]);
+    }
+  }
+
+  return [
+    {
+      filename: buildFilename(file.name, "rearranged"),
+      bytes: await target.save(),
+    },
+  ];
+}
+
+export async function redactPdf(
+  file: File, 
+  redactions: Array<{ pageIndex: number; x: number; y: number; width: number; height: number }>
+) {
+  const source = await PDFDocument.load(await file.arrayBuffer());
+  const pages = source.getPages();
+
+  for (const redaction of redactions) {
+    if (redaction.pageIndex >= 0 && redaction.pageIndex < pages.length) {
+      const page = pages[redaction.pageIndex];
+      const { width: pw, height: ph } = page.getSize();
+      
+      const pdfX = redaction.x * pw;
+      const pdfWidth = redaction.width * pw;
+      const pdfHeight = redaction.height * ph;
+      const pdfY = ph - (redaction.y * ph) - pdfHeight;
+
+      page.drawRectangle({
+        x: pdfX,
+        y: pdfY,
+        width: pdfWidth,
+        height: pdfHeight,
+        color: rgb(0, 0, 0),
+      });
+    }
+  }
+
+  return [
+    {
+      filename: buildFilename(file.name, "redacted"),
+      bytes: await source.save(),
+    },
+  ];
+}
+
+export async function signPdf(
+  file: File, 
+  signatures: Array<{ pageIndex: number; dataUrl: string; x: number; y: number; width: number; height: number }>
+) {
+  const source = await PDFDocument.load(await file.arrayBuffer());
+  const pages = source.getPages();
+
+  for (const sig of signatures) {
+    if (sig.pageIndex >= 0 && sig.pageIndex < pages.length) {
+      const page = pages[sig.pageIndex];
+      const { width: pw, height: ph } = page.getSize();
+      
+      let embeddedImage;
+      if (sig.dataUrl.startsWith('data:image/png')) {
+        embeddedImage = await source.embedPng(sig.dataUrl);
+      } else if (sig.dataUrl.startsWith('data:image/jpeg') || sig.dataUrl.startsWith('data:image/jpg')) {
+        embeddedImage = await source.embedJpg(sig.dataUrl);
+      } else {
+        continue;
+      }
+
+      const pdfX = sig.x * pw;
+      const pdfWidth = sig.width * pw;
+      const pdfHeight = sig.height * ph;
+      const pdfY = ph - (sig.y * ph) - pdfHeight;
+
+      page.drawImage(embeddedImage, {
+        x: pdfX,
+        y: pdfY,
+        width: pdfWidth,
+        height: pdfHeight,
+      });
+    }
+  }
+
+  return [
+    {
+      filename: buildFilename(file.name, "signed"),
+      bytes: await source.save(),
+    },
+  ];
+}
+
 function buildFilename(originalName: string, suffix: string) {
   const sanitizedName = originalName.toLowerCase().endsWith(".pdf")
     ? originalName.slice(0, -4)

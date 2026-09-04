@@ -12,6 +12,8 @@ const PdfViewer = dynamic(
   () => import('@/components/pdf/viewer/PdfViewer').then((mod) => mod.PdfViewer),
   { ssr: false, loading: () => <div className="p-8 text-center text-slate-500">Initializing viewer...</div> }
 );
+import { RedactOverlay } from "@/components/pdf/interactive/RedactOverlay";
+import { SignOverlay } from "@/components/pdf/interactive/SignOverlay";
 import { downloadBytes } from "@/lib/pdf/download";
 import {
   addPageNumbers,
@@ -22,13 +24,22 @@ import {
   rotatePdf,
   splitPdfByRanges,
   watermarkPdf,
+  rearrangePdf,
+  redactPdf,
+  signPdf,
 } from "@/lib/pdf/operations";
+import { compressPdf, ocrPdf } from "@/lib/pdf/heavy-operations";
+import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
+import { pdfToWordCloud, pdfToExcelCloud } from "@/lib/pdf/cloud-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
 
 type StudioResult = {
   filename: string;
   bytes: Uint8Array;
 };
+
+import type { RedactionRect } from "@/components/pdf/interactive/RedactOverlay";
+import type { SignaturePlacement } from "@/components/pdf/interactive/SignOverlay";
 
 type FormState = {
   pageRanges: string;
@@ -40,6 +51,12 @@ type FormState = {
   blankPageCount: string;
   blankWidth: string;
   blankHeight: string;
+  pageOrder: number[];
+  redactions: RedactionRect[];
+  signatures: SignaturePlacement[];
+  signatureDataUrl: string | null;
+  compressionLevel: "low" | "recommended" | "strong";
+  imageFormat: "jpeg" | "png";
 };
 
 const INITIAL_FORM: FormState = {
@@ -52,6 +69,12 @@ const INITIAL_FORM: FormState = {
   blankPageCount: "1",
   blankWidth: "595",
   blankHeight: "842",
+  pageOrder: [],
+  redactions: [],
+  signatures: [],
+  signatureDataUrl: null,
+  compressionLevel: "recommended",
+  imageFormat: "jpeg",
 };
 
 export function Workspace() {
@@ -78,6 +101,17 @@ export function Workspace() {
     "pdf.watermark": "watermark",
     "pdf.page-numbers": "page-numbers",
     "pdf.blank": "blank",
+    "pdf.rearrange": "rearrange",
+    "pdf.redact": "redact",
+    "pdf.sign": "sign",
+    "pdf.compress": "compress",
+    "pdf.ocr": "ocr",
+    "pdf.pdf-to-image": "pdf-to-image",
+    "pdf.extract-text": "extract-text",
+    "pdf.analyze-structure": "analyze-structure",
+    "pdf.pdf-to-word": "pdf-to-word",
+    "pdf.pdf-to-excel": "pdf-to-excel",
+    "pdf.extract-tables": "extract-tables",
   };
   const activeTool = toolIdMap[activeId] || "merge";
   const acceptsMultiple = capability?.supportsBatch || false;
@@ -94,11 +128,11 @@ export function Workspace() {
     setResults([]);
 
     if (accepted.length !== nextFiles.length && activeTool !== "blank") {
-      setStatus("Only PDF files are supported in the current V1 tool set.");
+      setStatus("Only PDFs supported");
       setStatusTone("error");
       return;
     }
-    setStatus(`${accepted.length} file(s) ready.`);
+    setStatus(accepted.length === 1 ? "1 file ready" : `${accepted.length} files ready`);
     setStatusTone("neutral");
   }
 
@@ -157,6 +191,39 @@ export function Workspace() {
               body: form.blankBody,
             });
             break;
+          case "rearrange":
+            nextResults = await rearrangePdf(files[0], form.pageOrder);
+            break;
+          case "redact":
+            nextResults = await redactPdf(files[0], form.redactions);
+            break;
+          case "sign":
+            nextResults = await signPdf(files[0], form.signatures);
+            break;
+          case "compress":
+            nextResults = await compressPdf(files[0], form.compressionLevel, (msg) => setStatus(msg));
+            break;
+          case "ocr":
+            nextResults = await ocrPdf(files[0], (msg) => setStatus(msg));
+            break;
+          case "pdf-to-image":
+            nextResults = await pdfToImage(files[0], form.imageFormat, 2.0, (msg) => setStatus(msg));
+            break;
+          case "extract-text":
+            nextResults = await extractPdfText(files[0], (msg) => setStatus(msg));
+            break;
+          case "analyze-structure":
+            nextResults = await analyzeDocumentStructure(files[0], (msg) => setStatus(msg));
+            break;
+          case "pdf-to-word":
+            nextResults = await pdfToWordCloud(files[0], (msg) => setStatus(msg));
+            break;
+          case "pdf-to-excel":
+            nextResults = await pdfToExcelCloud(files[0], (msg) => setStatus(msg));
+            break;
+          case "extract-tables":
+            nextResults = await extractTables(files[0], (msg) => setStatus(msg));
+            break;
           default:
             throw new Error("This capability is not ready yet.");
         }
@@ -164,8 +231,8 @@ export function Workspace() {
         setResults(nextResults);
         setStatus(
           nextResults.length === 1
-            ? "Your output is ready."
-            : `${nextResults.length} outputs generated.`
+            ? "1 output ready"
+            : `${nextResults.length} outputs ready`
         );
         setStatusTone("success");
       } catch (error) {
@@ -208,7 +275,7 @@ export function Workspace() {
       <div className="flex flex-1 overflow-hidden">
         
         {/* LEFT: CAPABILITY NAVIGATION */}
-        <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto flex flex-col p-4">
+        <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto flex flex-col p-4 shrink-0">
           {capabilityGroups.map((group, idx) => (
             <div key={idx} className="mb-8">
               <h3 className="text-xs font-bold tracking-widest uppercase text-slate-400 mb-3 ml-2">
@@ -245,50 +312,40 @@ export function Workspace() {
 
         {/* CENTER: DOCUMENT CANVAS */}
         <main className="flex-1 flex flex-col min-w-0 bg-[#f0f2f5] relative">
-          <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center">
+          <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
             
             {activeFormat === "pdf" ? (
-              <div className="w-full h-full flex flex-col relative">
-                {/* Context Header */}
-                <div className="border-b border-slate-200 p-5 bg-white flex justify-between items-start shrink-0 rounded-t-xl">
-                  <div>
-                    <h2 className="text-xl font-display text-slate-900 mb-1">{capability?.name}</h2>
-                    <p className="text-sm text-slate-500">{capability?.summary}</p>
+              <div className="w-full h-full flex flex-col relative bg-white">
+                {/* Compact Context Header */}
+                <div className="h-14 md:h-16 border-b border-slate-200 px-4 md:px-6 bg-white flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-display text-slate-900">{capability?.name}</h2>
+                    <p className="text-xs text-slate-500 hidden md:block">{capability?.summary}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-4">
+                    {status && (
+                      <div className={clsx(
+                        "text-xs font-medium flex items-center gap-1.5",
+                        statusTone === "error" ? "text-red-600" :
+                        statusTone === "success" ? "text-green-600" :
+                        "text-slate-500"
+                      )}>
+                        <span className="text-[10px]">●</span> {status}
+                      </div>
+                    )}
                     <button 
                       onClick={runTool} 
                       disabled={isPending || (!files.length && activeTool !== "blank")}
-                      className="bg-layah-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                      className="bg-layah-primary text-white px-5 py-1.5 rounded-md text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shrink-0"
                     >
                       {isPending ? "Processing..." : "Run Tool"}
                     </button>
                   </div>
                 </div>
 
-                {/* Status Banner */}
-                {status && (
-                  <div className={clsx(
-                    "px-6 py-2.5 text-sm font-medium shrink-0",
-                    statusTone === "error" ? "bg-red-50 text-red-700 border-b border-red-100" :
-                    statusTone === "success" ? "bg-green-50 text-green-700 border-b border-green-100" :
-                    "bg-blue-50 text-layah-primary border-b border-blue-100"
-                  )}>
-                    {status}
-                  </div>
-                )}
-
-                {/* Configuration Panel Floating Overlay (Only if active tool needs fields) */}
-                {(files.length > 0 || activeTool === "blank") && activeTool !== "merge" && (
-                  <div className="absolute top-24 right-6 w-80 bg-white/95 backdrop-blur shadow-xl p-5 rounded-xl border border-slate-200 z-20">
-                    <h3 className="text-xs font-bold text-slate-900 mb-3 uppercase tracking-wider">Configuration</h3>
-                    <ToolFields activeTool={activeTool} form={form} updateForm={updateForm} />
-                  </div>
-                )}
-
                 {/* Document Surface / Viewer */}
                 <div className="flex-1 relative flex flex-col min-h-0 bg-[#e4e7ec] overflow-hidden">
-                  
+
                   {/* File Input (Hidden) */}
                   <input
                     ref={fileInputRef}
@@ -315,7 +372,21 @@ export function Workspace() {
 
                   {/* PDF Viewer */}
                   {files.length > 0 && activeTool !== "blank" && (
-                     <PdfViewer file={files[0]} />
+                     <PdfViewer 
+                       file={files[0]} 
+                       viewMode={activeTool === "rearrange" ? "grid" : "scroll"}
+                       pageOrder={activeTool === "rearrange" ? form.pageOrder : undefined}
+                       onPageReorder={(order) => updateForm("pageOrder", order)}
+                       renderPageOverlay={(pageIndex) => {
+                         if (activeTool === "redact") {
+                           return <RedactOverlay pageIndex={pageIndex} redactions={form.redactions} onChange={(redactions) => updateForm("redactions", redactions)} />;
+                         }
+                         if (activeTool === "sign") {
+                           return <SignOverlay pageIndex={pageIndex} signatures={form.signatures} onChange={(signatures) => updateForm("signatures", signatures)} activeSignatureDataUrl={form.signatureDataUrl} />;
+                         }
+                         return null;
+                       }}
+                     />
                   )}
                   
                   {/* Blank PDF View Placeholder */}
@@ -342,9 +413,6 @@ export function Workspace() {
                 <p className="text-slate-500 mb-4">{activeFormat} tools are coming into this workspace.</p>
               </div>
             )}
-            
-            {/* Spacing for command bar */}
-            <div className="h-24"></div>
           </div>
 
           {/* Bottom Command Bar */}
@@ -356,7 +424,7 @@ export function Workspace() {
         </main>
 
         {/* RIGHT: FILES & OUTPUTS */}
-        <aside className="w-72 bg-white border-l border-slate-200 flex flex-col">
+        <aside className="w-72 bg-white border-l border-slate-200 flex flex-col shrink-0">
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
             
             <div className="mb-6 flex items-center justify-between">
@@ -387,20 +455,46 @@ export function Workspace() {
             </div>
             
             <div className="flex flex-col gap-3">
-              {results.length > 0 ? results.map((res, i) => (
+              {results.length > 0 ? results.map((res, i) => {
+                const originalSize = files[0]?.size || 0;
+                const newSize = res.bytes.length;
+                const reduction = originalSize > 0 ? ((originalSize - newSize) / originalSize * 100).toFixed(1) : "0";
+                const isCompressed = activeTool === "compress" && originalSize > 0;
+
+                return (
                 <div key={i} className="bg-blue-50 border border-blue-100 p-3 rounded-lg flex flex-col gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-900 truncate">{res.filename}</p>
-                    <p className="text-xs text-blue-600 font-medium">Ready</p>
+                    <p className="text-sm font-medium text-slate-900 truncate" title={res.filename}>{res.filename}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-xs text-blue-600 font-medium">Ready ({(newSize / 1024 / 1024).toFixed(2)} MB)</p>
+                      {isCompressed && Number(reduction) > 0 && (
+                        <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold">
+                          -{reduction}%
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <button onClick={() => downloadBytes(res.bytes, res.filename)} className="w-full text-xs font-medium bg-white border border-blue-200 text-layah-primary py-1.5 rounded hover:bg-blue-100 transition-colors">
                     Download
                   </button>
                 </div>
-              )) : (
+                );
+              }) : (
                 <p className="text-sm text-slate-500 text-center py-4">No outputs yet</p>
               )}
             </div>
+
+            {/* CONFIGURATION SECTION */}
+            {(files.length > 0 || activeTool === "blank") && activeTool !== "merge" && (
+              <div className="mt-8 border-t border-slate-100 pt-6">
+                <div className="mb-6 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Configuration</h3>
+                </div>
+                <div className="flex flex-col gap-4">
+                  <ToolFields activeTool={activeTool} form={form} updateForm={updateForm} />
+                </div>
+              </div>
+            )}
 
           </div>
         </aside>
@@ -480,6 +574,119 @@ function ToolFields({
   }
 
   if (activeTool === "merge") return null;
+
+  if (activeTool === "rearrange") {
+    return (
+      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        Drag and drop the page thumbnails in the viewer to reorder them.
+      </div>
+    );
+  }
+
+  if (activeTool === "redact") {
+    return (
+      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        Drag directly on the document pages in the viewer to draw redaction regions.
+      </div>
+    );
+  }
+
+  if (activeTool === "sign") {
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        updateForm("signatureDataUrl", event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    };
+
+    return (
+      <div className="flex flex-col gap-3">
+        <label className={labelClass}>
+          Signature Image (PNG/JPG)
+          <input type="file" accept="image/png, image/jpeg" className={inputClass} onChange={handleFileChange} />
+        </label>
+        {form.signatureDataUrl && (
+          <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+            Click anywhere on a document page to place your signature.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (activeTool === "compress") {
+    return (
+      <div className="flex flex-col gap-3">
+        <label className={labelClass}>
+          Compression Level
+          <select className={inputClass} value={form.compressionLevel} onChange={(e) => updateForm("compressionLevel", e.target.value as any)}>
+            <option value="low">Low (High Quality)</option>
+            <option value="recommended">Recommended (Good Balance)</option>
+            <option value="strong">Strong (Smallest Size)</option>
+          </select>
+        </label>
+        <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 p-3 rounded-md">
+          Note: V1 Compression attempts structural reduction via pdf-lib. True image downsampling requires backend processing.
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTool === "ocr") {
+    return (
+      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        This tool uses local WASM (Tesseract) to scan images and build a searchable text layer. 
+        It runs entirely in your browser.
+      </div>
+    );
+  }
+
+  if (activeTool === "pdf-to-image") {
+    return (
+      <label className={labelClass}>
+        Image Format
+        <select className={inputClass} value={form.imageFormat} onChange={(e) => updateForm("imageFormat", e.target.value as any)}>
+          <option value="jpeg">JPEG (Smaller file size)</option>
+          <option value="png">PNG (Lossless quality)</option>
+        </select>
+      </label>
+    );
+  }
+
+  if (activeTool === "extract-text") {
+    return (
+      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        Extracts structured text with precise coordinate bounding boxes and page associations. Outputs JSON.
+      </div>
+    );
+  }
+
+  if (activeTool === "analyze-structure") {
+    return (
+      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        Analyzes the document's structure, detecting headings and structural blocks. Outputs JSON.
+      </div>
+    );
+  }
+
+  if (activeTool === "pdf-to-word" || activeTool === "pdf-to-excel") {
+    return (
+      <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-md">
+        This capability requires a cloud backend (e.g., Adobe PDF Services) to preserve exact formatting.
+      </div>
+    );
+  }
+
+  if (activeTool === "extract-tables") {
+    return (
+      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        Uses local heuristics to detect tabular data (rows and columns). Outputs structured JSON.
+      </div>
+    );
+  }
 
   const label = activeTool === "split" ? "Page ranges" : activeTool === "extract" ? "Pages to extract" : "Pages to delete";
   const helper = activeTool === "split" ? "Example: 1-2, 3-4 creates multiple PDFs." : "Example: 1, 3-5";

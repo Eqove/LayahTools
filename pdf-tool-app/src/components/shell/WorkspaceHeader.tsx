@@ -21,7 +21,7 @@ export function WorkspaceHeader({ goHome }: { goHome: () => void }) {
           onClick={goHome}
           className="font-sans font-bold text-xl tracking-tight text-slate-900 hover:text-layah-primary transition-colors"
         >
-          layah.tools
+          LayahTools
         </button>
       </div>
 

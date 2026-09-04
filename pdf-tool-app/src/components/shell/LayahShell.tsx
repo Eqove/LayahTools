@@ -33,7 +33,7 @@ export function LayahShell() {
       <footer className="w-full bg-slate-50 border-t border-slate-200 py-16 mt-auto">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-4 gap-12">
           <div>
-            <div className="font-bold text-xl tracking-tight text-slate-900 mb-4">layah.tools</div>
+            <div className="font-bold text-xl tracking-tight text-slate-900 mb-4 font-sans">LayahTools</div>
             <p className="text-sm text-slate-500 leading-relaxed">
               The easiest way to get work done with files. Fast, private, and AI-powered.
             </p>

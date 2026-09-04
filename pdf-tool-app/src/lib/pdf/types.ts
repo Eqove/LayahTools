@@ -6,7 +6,18 @@ export type PdfToolId =
   | "rotate"
   | "watermark"
   | "page-numbers"
-  | "blank";
+  | "blank"
+  | "rearrange"
+  | "redact"
+  | "sign"
+  | "compress"
+  | "ocr"
+  | "pdf-to-image"
+  | "extract-text"
+  | "analyze-structure"
+  | "pdf-to-word"
+  | "pdf-to-excel"
+  | "extract-tables";
 
 export type ToolDescriptor = {
   id: PdfToolId;

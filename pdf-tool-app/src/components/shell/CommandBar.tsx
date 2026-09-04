@@ -1,12 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "@/lib/state/app-state";
 import clsx from "clsx";
+
+const PLACEHOLDER_EXAMPLES = [
+  "delete pages 3, 7 and 12, then add page numbers...",
+  "merge these files and compress the result...",
+  "extract pages 2–6 and add a watermark...",
+  "remove unwanted pages and rotate the remaining pages...",
+  "delete pages 5, 8 and 11, add borders and margins..."
+];
 
 export function CommandBar() {
   const { commandInput, setCommandInput } = useApp();
   const [isFocused, setIsFocused] = useState(false);
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
+  useEffect(() => {
+    if (isFocused) return;
+    const interval = setInterval(() => {
+      setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDER_EXAMPLES.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isFocused]);
+
+  const currentPlaceholder = isFocused ? "Enter a command..." : PLACEHOLDER_EXAMPLES[placeholderIndex];
 
   return (
     <div 
@@ -35,7 +54,7 @@ export function CommandBar() {
         {isFocused ? (
           <textarea
             className="flex-1 min-h-[80px] px-4 py-2 text-base text-slate-800 bg-transparent resize-none focus:outline-none placeholder:text-slate-400"
-            placeholder="Ask Layah to do something with this document..."
+            placeholder={currentPlaceholder}
             value={commandInput}
             onChange={(e) => setCommandInput(e.target.value)}
             onFocus={() => setIsFocused(true)}
@@ -43,14 +62,22 @@ export function CommandBar() {
             autoFocus
           />
         ) : (
-          <input
-            type="text"
-            className="flex-1 h-full px-4 text-base text-slate-800 bg-transparent focus:outline-none placeholder:text-slate-400 cursor-text"
-            placeholder="Ask Layah to do something with this document..."
-            value={commandInput}
-            onChange={(e) => setCommandInput(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-          />
+          <div className="flex-1 relative h-full">
+            <input
+              type="text"
+              className="absolute inset-0 w-full h-full px-4 text-base text-slate-800 bg-transparent focus:outline-none placeholder:text-transparent cursor-text z-10"
+              value={commandInput}
+              onChange={(e) => setCommandInput(e.target.value)}
+              onFocus={() => setIsFocused(true)}
+            />
+            {!commandInput && (
+              <div className="absolute inset-0 flex items-center px-4 pointer-events-none overflow-hidden">
+                 <span className="text-slate-400 truncate animate-in fade-in duration-500" key={placeholderIndex}>
+                   {currentPlaceholder}
+                 </span>
+              </div>
+            )}
+          </div>
         )}
 
         <button 
