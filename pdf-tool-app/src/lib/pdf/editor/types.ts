@@ -21,6 +21,10 @@ export interface PdfTextObject {
   text: string;
   bounds: PdfObjectBounds;
   transform: PdfTransform | null;
+  fontSize?: number;
+  fontWeight?: number;
+  italicAngle?: number;
+  fontName?: string;
 }
 
 export interface PdfImageObject {
@@ -38,6 +42,8 @@ export interface PdfPageInfo {
   width: number;
   height: number;
   objectCount: number;
+  /** Page /Rotate in degrees (0/90/180/270). */
+  rotation: number;
 }
 
 export interface PdfTextOptions {
@@ -46,4 +52,26 @@ export interface PdfTextOptions {
   y: number;
   fontFamily?: string;
   fontSize?: number;
+  /** [r,g,b] 0-255 */
+  color?: [number, number, number];
+}
+
+export interface PdfImageOptions {
+  rgba: Uint8Array | Uint8ClampedArray;
+  pixelWidth: number;
+  pixelHeight: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfRectOptions {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fill?: [number, number, number];
+  stroke?: [number, number, number];
+  strokeWidth?: number;
 }

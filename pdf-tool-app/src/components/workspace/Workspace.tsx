@@ -14,6 +14,12 @@ const PdfViewer = dynamic(
 );
 import { RedactOverlay } from "@/components/pdf/interactive/RedactOverlay";
 import { SignOverlay } from "@/components/pdf/interactive/SignOverlay";
+
+const EditorController = dynamic(
+  () => import('@/components/pdf/interactive/EditorController').then((mod) => mod.EditorController),
+  { ssr: false, loading: () => <div className="p-8 text-center text-slate-500">Initializing editor...</div> }
+);
+
 import { downloadBytes } from "@/lib/pdf/download";
 import {
   addPageNumbers,
@@ -32,11 +38,16 @@ import { compressPdf, ocrPdf } from "@/lib/pdf/heavy-operations";
 import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
 import { pdfToWordCloud, pdfToExcelCloud } from "@/lib/pdf/cloud-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
+import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, type WorkspaceFile } from "@/lib/workspace/files";
 
 type StudioResult = {
   filename: string;
   bytes: Uint8Array;
+  /** Size of the input this output was made from (for the compression delta). */
+  sourceSize?: number;
 };
+
+
 
 import type { RedactionRect } from "@/components/pdf/interactive/RedactOverlay";
 import type { SignaturePlacement } from "@/components/pdf/interactive/SignOverlay";
@@ -59,6 +70,8 @@ type FormState = {
   imageFormat: "jpeg" | "png";
 };
 
+const LARGE_FILE_BYTES = 50 * 1024 * 1024;
+
 const INITIAL_FORM: FormState = {
   pageRanges: "1-2",
   rotateAngle: "90",
@@ -79,7 +92,14 @@ const INITIAL_FORM: FormState = {
 
 export function Workspace() {
   const { activeCapabilityId, setActiveCapabilityId, activeFormat, setWorkspaceActive } = useApp();
-  const [files, setFiles] = useState<File[]>([]);
+  // Ownership: `items` = the uploaded collection; `activeFileId` = which one single-document tools/viewer use;
+  // `results` = accumulated outputs. Tools read these; only explicit user actions remove entries.
+  const [items, setItems] = useState<WorkspaceFile[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const nextId = useRef(1);
+  const files = useMemo(() => items.map((i) => i.file), [items]);
+  const active = resolveActive(items, activeFileId);
+  const activeFile = active?.file as File; // callers guard with files.length / ensureFiles()
   const [results, setResults] = useState<StudioResult[]>([]);
   const [status, setStatus] = useState("");
   const [statusTone, setStatusTone] = useState<"neutral" | "success" | "error">("neutral");
@@ -112,6 +132,7 @@ export function Workspace() {
     "pdf.pdf-to-word": "pdf-to-word",
     "pdf.pdf-to-excel": "pdf-to-excel",
     "pdf.extract-tables": "extract-tables",
+    "pdf.edit": "edit",
   };
   const activeTool = toolIdMap[activeId] || "merge";
   const acceptsMultiple = capability?.supportsBatch || false;
@@ -121,19 +142,33 @@ export function Workspace() {
     fileInputRef.current?.click();
   }
 
+  /** Append (never replace). Re-adding an identical file (name+size+modified time) is skipped; same name with different content is kept. */
   function handleFiles(nextFiles: FileList | null) {
     if (!nextFiles?.length) return;
-    const accepted = [...nextFiles].filter((file) => file.type === "application/pdf");
-    setFiles(accepted);
-    setResults([]);
-
-    if (accepted.length !== nextFiles.length && activeTool !== "blank") {
-      setStatus("Only PDFs supported");
-      setStatusTone("error");
-      return;
+    const picked = [...nextFiles];
+    const r = addFiles(items, picked, () => `f${nextId.current++}`);
+    const added = r.added;
+    if (added.length) {
+      setItems(r.items);
+      setActiveFileId(added[added.length - 1].id);
     }
-    setStatus(accepted.length === 1 ? "1 file ready" : `${accepted.length} files ready`);
-    setStatusTone("neutral");
+
+    const notes: string[] = [];
+    if (r.nonPdf) notes.push(`${r.nonPdf} non-PDF skipped`);
+    if (r.duplicates) notes.push(`${r.duplicates} already added`);
+    const oversized = added.filter((a) => a.file.size > LARGE_FILE_BYTES).length;
+    if (oversized) notes.push(`${oversized} large file${oversized > 1 ? "s" : ""} (over 50 MB) may be slow or run out of memory`);
+    setStatus(notes.length ? `${added.length} added, ${notes.join(", ")}` : added.length === 1 ? "1 file added" : `${added.length} files added`);
+    setStatusTone(r.nonPdf || oversized ? "error" : "neutral");
+  }
+
+  function removeFile(id: string) {
+    setItems((cur) => dropFile(cur, id));
+  }
+
+  /** Edits replace the bytes of an entry but keep its id, position and active state. */
+  function replaceFile(id: string, file: File) {
+    setItems((cur) => swapFile(cur, id, file));
   }
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -165,22 +200,22 @@ export function Workspace() {
             nextResults = await mergePdfFiles(files);
             break;
           case "split":
-            nextResults = await splitPdfByRanges(files[0], form.pageRanges);
+            nextResults = await splitPdfByRanges(activeFile, form.pageRanges);
             break;
           case "extract":
-            nextResults = await extractPdfPages(files[0], form.pageRanges);
+            nextResults = await extractPdfPages(activeFile, form.pageRanges);
             break;
           case "delete":
-            nextResults = await deletePdfPages(files[0], form.pageRanges);
+            nextResults = await deletePdfPages(activeFile, form.pageRanges);
             break;
           case "rotate":
-            nextResults = await rotatePdf(files[0], Number(form.rotateAngle));
+            nextResults = await rotatePdf(activeFile, Number(form.rotateAngle));
             break;
           case "watermark":
-            nextResults = await watermarkPdf(files[0], form.watermarkText);
+            nextResults = await watermarkPdf(activeFile, form.watermarkText);
             break;
           case "page-numbers":
-            nextResults = await addPageNumbers(files[0], form.pageNumberPrefix);
+            nextResults = await addPageNumbers(activeFile, form.pageNumberPrefix);
             break;
           case "blank":
             nextResults = await createBlankPdf({
@@ -192,43 +227,44 @@ export function Workspace() {
             });
             break;
           case "rearrange":
-            nextResults = await rearrangePdf(files[0], form.pageOrder);
+            nextResults = await rearrangePdf(activeFile, form.pageOrder);
             break;
           case "redact":
-            nextResults = await redactPdf(files[0], form.redactions);
+            nextResults = await redactPdf(activeFile, form.redactions);
             break;
           case "sign":
-            nextResults = await signPdf(files[0], form.signatures);
+            nextResults = await signPdf(activeFile, form.signatures);
             break;
           case "compress":
-            nextResults = await compressPdf(files[0], form.compressionLevel, (msg) => setStatus(msg));
+            nextResults = await compressPdf(activeFile, form.compressionLevel, (msg) => setStatus(msg));
             break;
           case "ocr":
-            nextResults = await ocrPdf(files[0], (msg) => setStatus(msg));
+            nextResults = await ocrPdf(activeFile, (msg) => setStatus(msg));
             break;
           case "pdf-to-image":
-            nextResults = await pdfToImage(files[0], form.imageFormat, 2.0, (msg) => setStatus(msg));
+            nextResults = await pdfToImage(activeFile, form.imageFormat, 2.0, (msg) => setStatus(msg));
             break;
           case "extract-text":
-            nextResults = await extractPdfText(files[0], (msg) => setStatus(msg));
+            nextResults = await extractPdfText(activeFile, (msg) => setStatus(msg));
             break;
           case "analyze-structure":
-            nextResults = await analyzeDocumentStructure(files[0], (msg) => setStatus(msg));
+            nextResults = await analyzeDocumentStructure(activeFile, (msg) => setStatus(msg));
             break;
           case "pdf-to-word":
-            nextResults = await pdfToWordCloud(files[0], (msg) => setStatus(msg));
+            nextResults = await pdfToWordCloud(activeFile, (msg) => setStatus(msg));
             break;
           case "pdf-to-excel":
-            nextResults = await pdfToExcelCloud(files[0], (msg) => setStatus(msg));
+            nextResults = await pdfToExcelCloud(activeFile, (msg) => setStatus(msg));
             break;
           case "extract-tables":
-            nextResults = await extractTables(files[0], (msg) => setStatus(msg));
+            nextResults = await extractTables(activeFile, (msg) => setStatus(msg));
             break;
           default:
             throw new Error("This capability is not ready yet.");
         }
 
-        setResults(nextResults);
+        const tagged = nextResults.map((r) => ({ ...r, sourceSize: activeFile?.size }));
+        setResults((prev) => [...tagged, ...prev]);
         setStatus(
           nextResults.length === 1
             ? "1 output ready"
@@ -236,7 +272,6 @@ export function Workspace() {
         );
         setStatusTone("success");
       } catch (error) {
-        setResults([]);
         setStatus(error instanceof Error ? error.message : "Something went wrong.");
         setStatusTone("error");
       }
@@ -291,7 +326,6 @@ export function Workspace() {
                       key={id}
                       onClick={() => {
                         setActiveCapabilityId(id);
-                        setResults([]);
                         setStatus("");
                       }}
                       className={clsx(
@@ -312,7 +346,7 @@ export function Workspace() {
 
         {/* CENTER: DOCUMENT CANVAS */}
         <main className="flex-1 flex flex-col min-w-0 bg-[#f0f2f5] relative">
-          <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+          <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
             
             {activeFormat === "pdf" ? (
               <div className="w-full h-full flex flex-col relative bg-white">
@@ -333,13 +367,13 @@ export function Workspace() {
                         <span className="text-[10px]">●</span> {status}
                       </div>
                     )}
-                    <button 
+                    {activeTool !== "edit" && <button 
                       onClick={runTool} 
                       disabled={isPending || (!files.length && activeTool !== "blank")}
                       className="bg-layah-primary text-white px-5 py-1.5 rounded-md text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shrink-0"
                     >
                       {isPending ? "Processing..." : "Run Tool"}
-                    </button>
+                    </button>}
                   </div>
                 </div>
 
@@ -352,8 +386,11 @@ export function Workspace() {
                     type="file"
                     className="hidden"
                     accept="application/pdf"
-                    multiple={acceptsMultiple}
-                    onChange={(event) => handleFiles(event.target.files)}
+                    multiple
+                    onChange={(event) => {
+                      handleFiles(event.target.files);
+                      event.target.value = ""; // allow picking the same file again
+                    }}
                   />
 
                   {/* Empty State / Dropzone */}
@@ -370,10 +407,15 @@ export function Workspace() {
                     </div>
                   )}
 
+                  {/* Edit Tool Integration */}
+                  {files.length > 0 && activeTool === "edit" && (
+                     <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} />
+                  )}
+
                   {/* PDF Viewer */}
-                  {files.length > 0 && activeTool !== "blank" && (
+                  {files.length > 0 && activeTool !== "blank" && activeTool !== "edit" && (
                      <PdfViewer 
-                       file={files[0]} 
+                       file={activeFile} 
                        viewMode={activeTool === "rearrange" ? "grid" : "scroll"}
                        pageOrder={activeTool === "rearrange" ? form.pageOrder : undefined}
                        onPageReorder={(order) => updateForm("pageOrder", order)}
@@ -435,13 +477,23 @@ export function Workspace() {
             </div>
 
             <div className="flex flex-col gap-3 mb-8">
-              {files.length > 0 ? files.map((f, i) => (
-                <div key={i} className="bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-start justify-between group">
+              {items.length > 0 ? items.map((it) => (
+                <div
+                  key={it.id}
+                  onClick={() => setActiveFileId(it.id)}
+                  className={clsx(
+                    "border p-3 rounded-lg flex items-start justify-between group cursor-pointer",
+                    it.id === active?.id ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-100 hover:border-slate-200"
+                  )}
+                  aria-current={it.id === active?.id}
+                >
                   <div className="min-w-0 pr-2">
-                    <p className="text-sm font-medium text-slate-900 truncate">{f.name}</p>
-                    <p className="text-xs text-slate-500">{(f.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-sm font-medium text-slate-900 truncate" title={it.file.name}>{it.file.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {(it.file.size / 1024 / 1024).toFixed(2)} MB{it.id === active?.id && items.length > 1 ? " · active" : ""}
+                    </p>
                   </div>
-                  <button onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button aria-label={`Remove ${it.file.name}`} onClick={(e) => { e.stopPropagation(); removeFile(it.id); }} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
@@ -450,13 +502,14 @@ export function Workspace() {
               )}
             </div>
 
-            <div className="mb-6">
+            <div className="mb-6 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Outputs</h3>
+              {results.length > 0 && <button onClick={() => setResults([])} className="text-xs text-slate-500 hover:text-slate-900">Clear</button>}
             </div>
             
             <div className="flex flex-col gap-3">
               {results.length > 0 ? results.map((res, i) => {
-                const originalSize = files[0]?.size || 0;
+                const originalSize = res.sourceSize || 0;
                 const newSize = res.bytes.length;
                 const reduction = originalSize > 0 ? ((originalSize - newSize) / originalSize * 100).toFixed(1) : "0";
                 const isCompressed = activeTool === "compress" && originalSize > 0;
@@ -485,7 +538,7 @@ export function Workspace() {
             </div>
 
             {/* CONFIGURATION SECTION */}
-            {(files.length > 0 || activeTool === "blank") && activeTool !== "merge" && (
+            {(files.length > 0 || activeTool === "blank") && activeTool !== "merge" && activeTool !== "edit" && (
               <div className="mt-8 border-t border-slate-100 pt-6">
                 <div className="mb-6 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Configuration</h3>

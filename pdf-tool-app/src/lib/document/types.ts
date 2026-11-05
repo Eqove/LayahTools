@@ -24,6 +24,9 @@ export interface LayahTransform {
 }
 
 export type LayahObjectId = string;
+
+import { LayahTextRun } from "./runs";
+import { LayahTextBlock } from "./blocks";
 export type LayahObjectType = "text" | "image" | "path" | "unknown";
 
 export interface LayahProvenance {
@@ -48,6 +51,8 @@ export interface LayahTextObject extends LayahSourceBaseObject {
   text: string;
   fontFamily?: string;
   fontSize?: number;
+  fontWeight?: number;
+  isItalic?: boolean;
 }
 
 export interface LayahImageObject extends LayahSourceBaseObject {
@@ -72,20 +77,9 @@ export type LayahSourceObject =
 // ---------------------------------------------------------
 // 3. LAYOUT / INTERPRETATION MODEL
 // ---------------------------------------------------------
-export interface LayahTextRun {
-  id: string;
-  sourceObjectId: LayahObjectId;
-  text: string;
-  bounds: LayahObjectBounds;
-}
 
-export interface LayahTextBlock {
-  id: string;
-  pageIndex: number;
-  bounds: LayahObjectBounds;
-  runs: string[]; // References to LayahTextRun IDs
-  confidence?: number;
-}
+
+
 
 export interface LayahLayout {
   textBlocks: Record<string, LayahTextBlock>;
@@ -113,8 +107,4 @@ export interface LayahDocument {
 // ---------------------------------------------------------
 // 5. EDITOR STATE (Interaction state)
 // ---------------------------------------------------------
-export interface LayahEditorState {
-  activePageIndex: number;
-  selectedObjectIds: string[];
-  dirty: boolean;
-}
+

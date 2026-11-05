@@ -52,6 +52,9 @@ export class PdfToLayahMapper {
         ...baseProps,
         type: "text",
         text: textObj.text,
+        fontSize: textObj.fontSize,
+        fontWeight: textObj.fontWeight,
+        isItalic: textObj.italicAngle ? textObj.italicAngle !== 0 : undefined,
       } as LayahTextObject;
     }
 

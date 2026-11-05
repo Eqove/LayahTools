@@ -1,4 +1,5 @@
-import { LayahDocument, LayahEditorState, LayahPage, LayahSourceObject, LayahLayout } from "./types";
+import { LayahDocument, LayahPage, LayahSourceObject, LayahLayout } from "./types";
+import { LayahEditorState, INITIAL_EDITOR_STATE } from "./interaction";
 
 /**
  * Framework-independent document store.
@@ -16,11 +17,7 @@ export class LayahDocumentStore {
       metadata: {},
     };
 
-    this.editorState = initialEditorState || {
-      activePageIndex: 0,
-      selectedObjectIds: [],
-      dirty: false,
-    };
+    this.editorState = initialEditorState || { ...INITIAL_EDITOR_STATE, activePage: 0 };
   }
 
   // --- Document Access ---
@@ -47,14 +44,14 @@ export class LayahDocumentStore {
   
   addPage(page: LayahPage): void {
     this.document.pages[page.pageIndex] = page;
-    this.markDirty();
+
   }
 
   addObject(pageIndex: number, object: LayahSourceObject): void {
     const page = this.getPage(pageIndex);
     if (!page) throw new Error(`Page ${pageIndex} does not exist`);
     page.objects[object.id] = object;
-    this.markDirty();
+
   }
 
   // --- Editor State ---
@@ -64,19 +61,11 @@ export class LayahDocumentStore {
   }
 
   setActivePage(pageIndex: number): void {
-    this.editorState.activePageIndex = pageIndex;
+    this.editorState.activePage = pageIndex;
   }
 
   selectObjects(objectIds: string[]): void {
     this.editorState.selectedObjectIds = [...objectIds];
-  }
-
-  markDirty(): void {
-    this.editorState.dirty = true;
-  }
-
-  clearDirty(): void {
-    this.editorState.dirty = false;
   }
 
   // --- Serialization ---
