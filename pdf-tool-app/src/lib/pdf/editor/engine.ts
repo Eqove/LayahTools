@@ -5,7 +5,9 @@ import type {
   PdfImageObject, 
   PdfPageObject, 
   PdfTransform, 
-  PdfTextOptions 
+  PdfTextOptions,
+  PdfImageOptions,
+  PdfRectOptions
 } from "./types";
 
 /**
@@ -33,9 +35,9 @@ export class PdfEditorEngine {
       if (wasmBinary) {
         this.pdfium = await init({ wasmBinary });
       } else {
-        // Fallback to CDN for browser lazy-loading
-        const cdnUrl = "https://cdn.jsdelivr.net/npm/@embedpdf/pdfium/dist/pdfium.wasm";
-        const response = await fetch(cdnUrl);
+        // Same-origin copy (public/pdfium.wasm, copied from node_modules by the predev/prebuild script)
+        const response = await fetch("/pdfium.wasm");
+        if (!response.ok) throw new Error(`pdfium.wasm not found (${response.status})`);
         const buffer = await response.arrayBuffer();
         this.pdfium = await init({ wasmBinary: buffer });
       }
@@ -64,9 +66,20 @@ export class PdfEditorEngine {
     this.docPtr = this.pdfium.FPDF_LoadMemDocument(this.docBufferPtr, pdfBytes.length, "");
     
     if (!this.docPtr) {
+      const code = this.pdfium.FPDF_GetLastError?.();
       this.cleanupDocument();
-      throw new Error("Failed to load PDF document in PDFium");
+      // FPDF_ERR_PASSWORD = 4
+      throw new Error(
+        code === 4
+          ? "This PDF is password-protected. Unlock it before editing."
+          : "This PDF could not be opened for editing (it may be damaged or unsupported)."
+      );
     }
+  }
+
+  async getPageCount(): Promise<number> {
+    this.ensureDocument();
+    return this.pdfium.FPDF_GetPageCount(this.docPtr);
   }
 
   /**
@@ -79,12 +92,14 @@ export class PdfEditorEngine {
     const width = this.pdfium.FPDF_GetPageWidth(page);
     const height = this.pdfium.FPDF_GetPageHeight(page);
     const objectCount = this.pdfium.FPDFPage_CountObjects(page);
+    const rotation = this.pdfium.FPDFPage_GetRotation(page) * 90;
 
     return {
       pageIndex,
       width,
       height,
-      objectCount
+      objectCount,
+      rotation
     };
   }
 
@@ -92,14 +107,35 @@ export class PdfEditorEngine {
    * Retrieves all text objects on a specific page.
    */
   async getTextObjects(pageIndex: number): Promise<PdfTextObject[]> {
-    return this.getObjectsByType(pageIndex, 1) as Promise<PdfTextObject[]>;
+    return this.getObjectsByType(pageIndex, [1]) as Promise<PdfTextObject[]>;
   }
 
   /**
    * Retrieves all image objects on a specific page.
    */
   async getImageObjects(pageIndex: number): Promise<PdfImageObject[]> {
-    return this.getObjectsByType(pageIndex, 3) as Promise<PdfImageObject[]>;
+    return this.getObjectsByType(pageIndex, [3]) as Promise<PdfImageObject[]>;
+  }
+
+  /** Fill colour [r,g,b] of an object, or null if unavailable. */
+  getFillColor(objectId: string): [number, number, number] | null {
+    this.ensureDocument();
+    const obj = this.parseObjectId(objectId);
+    const p = this.wasm._malloc(16);
+    try {
+      if (!this.pdfium.FPDFPageObj_GetFillColor(obj, p, p + 4, p + 8, p + 12)) return null;
+      return [this.wasm.getValue(p, "i32"), this.wasm.getValue(p + 4, "i32"), this.wasm.getValue(p + 8, "i32")];
+    } finally {
+      this.wasm._free(p);
+    }
+  }
+
+  /**
+   * Retrieves every text and image object on a page. IDs are transient pointers
+   * valid only until the next load()/dispose().
+   */
+  async getEditableObjects(pageIndex: number): Promise<PdfPageObject[]> {
+    return this.getObjectsByType(pageIndex, [1, 3]);
   }
 
   /**
@@ -199,6 +235,8 @@ export class PdfEditorEngine {
         throw new Error("Failed to set text content on new object");
       }
       
+      const [r, g, b] = options.color ?? [0, 0, 0];
+      this.pdfium.FPDFPageObj_SetFillColor(newTextObj, r, g, b, 255);
       this.pdfium.FPDFPageObj_Transform(newTextObj, 1, 0, 0, 1, options.x, options.y);
       this.pdfium.FPDFPage_InsertObject(page, newTextObj);
       this.pdfium.FPDFPage_GenerateContent(page);
@@ -207,6 +245,66 @@ export class PdfEditorEngine {
     } finally {
       this.wasm._free(strPtr);
     }
+  }
+
+  /**
+   * Embeds a raster image into the page content stream. `rgba` is straight
+   * (non-premultiplied) RGBA, pixelWidth*pixelHeight*4 bytes, as produced by canvas getImageData.
+   * The image occupies the rectangle (x, y, width, height) in PDF points.
+   */
+  async addImage(pageIndex: number, o: PdfImageOptions): Promise<string> {
+    this.ensureDocument();
+    if (o.rgba.length !== o.pixelWidth * o.pixelHeight * 4) {
+      throw new Error("Image pixel buffer does not match its dimensions");
+    }
+    const page = this.getPage(pageIndex);
+    const bitmap = this.pdfium.FPDFBitmap_Create(o.pixelWidth, o.pixelHeight, 1);
+    if (!bitmap) throw new Error("Failed to allocate image bitmap");
+    const imgObj = this.pdfium.FPDFPageObj_NewImageObj(this.docPtr);
+    try {
+      const buf = this.pdfium.FPDFBitmap_GetBuffer(bitmap);
+      const stride = this.pdfium.FPDFBitmap_GetStride(bitmap);
+      const heap: Uint8Array = this.wasm.HEAPU8;
+      for (let y = 0; y < o.pixelHeight; y++) {
+        let src = y * o.pixelWidth * 4;
+        let dst = buf + y * stride;
+        for (let x = 0; x < o.pixelWidth; x++, src += 4, dst += 4) {
+          heap[dst] = o.rgba[src + 2];     // B
+          heap[dst + 1] = o.rgba[src + 1]; // G
+          heap[dst + 2] = o.rgba[src];     // R
+          heap[dst + 3] = o.rgba[src + 3]; // A
+        }
+      }
+      if (!this.pdfium.FPDFImageObj_SetBitmap(0, 0, imgObj, bitmap)) {
+        throw new Error("PDFium rejected the image bitmap");
+      }
+      this.pdfium.FPDFImageObj_SetMatrix(imgObj, o.width, 0, 0, o.height, o.x, o.y);
+      this.pdfium.FPDFPage_InsertObject(page, imgObj);
+      this.pdfium.FPDFPage_GenerateContent(page);
+      return `ptr_${imgObj}`;
+    } catch (e) {
+      this.pdfium.FPDFPageObj_Destroy(imgObj);
+      throw e;
+    } finally {
+      this.pdfium.FPDFBitmap_Destroy(bitmap);
+    }
+  }
+
+  /** Adds a filled and/or stroked rectangle. Colours are [r,g,b] 0-255. */
+  async addRect(pageIndex: number, o: PdfRectOptions): Promise<string> {
+    this.ensureDocument();
+    const page = this.getPage(pageIndex);
+    const rect = this.pdfium.FPDFPageObj_CreateNewRect(o.x, o.y, o.width, o.height);
+    if (!rect) throw new Error("Failed to create rectangle");
+    if (o.fill) this.pdfium.FPDFPageObj_SetFillColor(rect, o.fill[0], o.fill[1], o.fill[2], 255);
+    if (o.stroke) {
+      this.pdfium.FPDFPageObj_SetStrokeColor(rect, o.stroke[0], o.stroke[1], o.stroke[2], 255);
+      this.pdfium.FPDFPageObj_SetStrokeWidth(rect, o.strokeWidth ?? 1);
+    }
+    this.pdfium.FPDFPath_SetDrawMode(rect, o.fill ? 1 : 0, !!o.stroke);
+    this.pdfium.FPDFPage_InsertObject(page, rect);
+    this.pdfium.FPDFPage_GenerateContent(page);
+    return `ptr_${rect}`;
   }
 
   /**
@@ -308,33 +406,76 @@ export class PdfEditorEngine {
     return parseInt(id.replace("ptr_", ""), 10);
   }
 
-  private async getObjectsByType(pageIndex: number, targetType: number): Promise<PdfPageObject[]> {
+  private async getObjectsByType(pageIndex: number, targetTypes: number[]): Promise<PdfPageObject[]> {
     this.ensureDocument();
     const page = this.getPage(pageIndex);
     const objectCount = this.pdfium.FPDFPage_CountObjects(page);
     const results: PdfPageObject[] = [];
-
+    const textPage = targetTypes.includes(1) ? this.pdfium.FPDFText_LoadPage(page) : 0;
+    try {
     for (let i = 0; i < objectCount; i++) {
       const objPtr = this.pdfium.FPDFPage_GetObject(page, i);
       const type = this.pdfium.FPDFPageObj_GetType(objPtr);
       
-      if (type === targetType) {
+      if (targetTypes.includes(type)) {
         const bounds = this.getObjectBounds(objPtr);
         const transform = this.getObjectMatrix(objPtr);
         const id = `ptr_${objPtr}`;
 
         if (type === 1) {
           // TEXT
-          const text = this.extractText(page, objPtr);
-          results.push({ id, type: "text", pageIndex, bounds, transform, text } as PdfTextObject);
+          const text = this.extractText(textPage, objPtr);
+          let fontSize: number | undefined;
+          let fontWeight: number | undefined;
+          let italicAngle: number | undefined;
+
+          const floatPtr = this.wasm._malloc(4);
+          try {
+            if (this.pdfium.FPDFTextObj_GetFontSize(objPtr, floatPtr)) {
+              fontSize = this.wasm.getValue(floatPtr, "float");
+            }
+          } finally {
+            this.wasm._free(floatPtr);
+          }
+
+          let fontName: string | undefined;
+          const fontPtr = this.pdfium.FPDFTextObj_GetFont(objPtr);
+          if (fontPtr) {
+            fontName = this.readFontName(fontPtr);
+            fontWeight = this.pdfium.FPDFFont_GetWeight(fontPtr);
+            const intPtr = this.wasm._malloc(4);
+            try {
+              if (this.pdfium.FPDFFont_GetItalicAngle(fontPtr, intPtr)) {
+                italicAngle = this.wasm.getValue(intPtr, "i32");
+              }
+            } finally {
+              this.wasm._free(intPtr);
+            }
+          }
+
+          results.push({ id, type: "text", pageIndex, bounds, transform, text, fontSize, fontWeight, italicAngle, fontName } as PdfTextObject);
         } else if (type === 3) {
           // IMAGE
           results.push({ id, type: "image", pageIndex, bounds, transform } as PdfImageObject);
         }
       }
     }
-    
+    } finally {
+      if (textPage) this.pdfium.FPDFText_ClosePage(textPage);
+    }
     return results;
+  }
+
+  private readFontName(fontPtr: number): string | undefined {
+    const len = this.pdfium.FPDFFont_GetBaseFontName(fontPtr, 0, 0);
+    if (!len) return undefined;
+    const ptr = this.wasm._malloc(len);
+    try {
+      this.pdfium.FPDFFont_GetBaseFontName(fontPtr, ptr, len);
+      return this.wasm.UTF8ToString(ptr);
+    } finally {
+      this.wasm._free(ptr);
+    }
   }
 
   private getObjectBounds(objPtr: number) {
@@ -379,12 +520,13 @@ export class PdfEditorEngine {
     }
   }
 
-  private extractText(pagePtr: number, objPtr: number): string {
-    const textPage = this.pdfium.FPDFText_LoadPage(pagePtr);
-    const bufferPtr = this.wasm._malloc(2048);
+  private extractText(textPage: number, objPtr: number): string {
+    const needed = this.pdfium.FPDFTextObj_GetText(objPtr, textPage, 0, 0);
+    const capacity = Math.max(needed, 2);
+    const bufferPtr = this.wasm._malloc(capacity);
     
     try {
-      const reqSize = this.pdfium.FPDFTextObj_GetText(objPtr, textPage, bufferPtr, 2048);
+      const reqSize = this.pdfium.FPDFTextObj_GetText(objPtr, textPage, bufferPtr, capacity);
       if (reqSize > 0) {
         const textBytes = this.wasm.HEAPU8.slice(bufferPtr, bufferPtr + reqSize);
         let text = "";
@@ -398,7 +540,6 @@ export class PdfEditorEngine {
       return "";
     } finally {
       this.wasm._free(bufferPtr);
-      this.pdfium.FPDFText_ClosePage(textPage);
     }
   }
 }

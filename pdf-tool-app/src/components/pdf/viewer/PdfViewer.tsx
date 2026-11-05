@@ -12,6 +12,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 interface PdfViewerProps {
   file: File | null;
   renderPageOverlay?: (pageIndex: number) => React.ReactNode;
+  /** Keep scroll position (and page) when `file` is swapped for an edited version of itself. */
+  preserveScroll?: boolean;
   viewMode?: "scroll" | "grid";
   pageOrder?: number[];
   onPageReorder?: (newOrder: number[]) => void;
@@ -20,6 +22,7 @@ interface PdfViewerProps {
 export function PdfViewer({ 
   file, 
   renderPageOverlay, 
+  preserveScroll = false,
   viewMode = "scroll", 
   pageOrder, 
   onPageReorder 
@@ -30,19 +33,49 @@ export function PdfViewer({
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Reset state when file changes
+  // Double buffering (preserveScroll): a changed `file` loads and renders in a hidden second <Document>;
+  // the visible one keeps showing the old pages until the new ones have painted, then they swap.
+  // This avoids react-pdf's loading state, which unmounts every page (the "flicker") whenever `file` changes.
+  const [shown, setShown] = useState<File | null>(file);
+  const incoming = preserveScroll && file && shown && file !== shown ? file : null;
+  const incomingPages = useRef(0);
+  const incomingRendered = useRef(0);
+  const keys = useRef({ map: new WeakMap<File, number>(), next: 1 });
+  const keyOf = (f: File) => {
+    if (!keys.current.map.has(f)) keys.current.map.set(f, keys.current.next++);
+    return keys.current.map.get(f)!;
+  };
+  const swap = () => {
+    if (!incoming) return;
+    setNumPages(incomingPages.current || numPages);
+    setShown(incoming);
+  };
+  const swapRef = useRef(swap);
+  swapRef.current = swap;
   useEffect(() => {
-    setNumPages(0);
-    setCurrentPage(1);
+    if (!incoming) return;
+    incomingPages.current = 0;
+    incomingRendered.current = 0;
+    // Safety net: never leave a stale document up if a page is slow or fails to render.
+    const t = setTimeout(() => swapRef.current(), 4000);
+    return () => clearTimeout(t);
+  }, [incoming]);
+
+  // Non-buffered viewers (other tools) reset when the file changes.
+  useEffect(() => {
+    if (!preserveScroll) {
+      setNumPages(0);
+      setCurrentPage(1);
+    }
     setError(null);
-  }, [file]);
+  }, [file, preserveScroll]);
 
   const [internalPageOrder, setInternalPageOrder] = useState<number[]>([]);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages);
-    setCurrentPage(1);
+    if (!preserveScroll) setCurrentPage(1);
     setError(null);
     if (!pageOrder || pageOrder.length !== numPages) {
       const order = Array.from({ length: numPages }, (_, i) => i);
@@ -143,6 +176,68 @@ export function PdfViewer({
   const zoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
   const zoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
 
+  const renderDoc = (f: File, hidden: boolean) => (
+    <div
+      key={keyOf(f)}
+      aria-hidden={hidden || undefined}
+      className={hidden ? "absolute top-0 left-0 right-0 invisible pointer-events-none py-8 px-4" : undefined}
+    >
+      <Document
+        file={f}
+        onLoadSuccess={hidden ? ({ numPages: n }) => { incomingPages.current = n; } : onDocumentLoadSuccess}
+        onLoadError={onDocumentLoadError}
+        loading={
+          <div className="flex items-center justify-center py-20 text-slate-500">
+            <span className="animate-pulse">Loading PDF...</span>
+          </div>
+        }
+        className={viewMode === "grid"
+          ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 pb-24 max-w-5xl mx-auto"
+          : "flex flex-col items-center gap-6 pb-24"}
+      >
+        {(internalPageOrder.length > 0 ? internalPageOrder : Array.from({ length: numPages }, (_, i) => i)).map((originalIndex, currentIndex) => {
+          const pageNum = originalIndex + 1;
+          return (
+            <div
+              key={`page_render_${originalIndex}_${currentIndex}`}
+              data-page-number={pageNum}
+              className={`bg-white shadow-md transition-transform relative ${
+                viewMode === "grid"
+                  ? "cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-blue-400"
+                  : ""
+              } ${draggedIdx === currentIndex ? "opacity-50" : ""}`}
+              draggable={viewMode === "grid"}
+              onDragStart={(e) => viewMode === "grid" && handleDragStart(e, currentIndex)}
+              onDragOver={(e) => {
+                if (viewMode === "grid") e.preventDefault();
+              }}
+              onDrop={(e) => viewMode === "grid" && handleDrop(e, currentIndex)}
+            >
+              {viewMode === "grid" && (
+                <div className="absolute top-2 left-2 bg-black/60 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center z-10 pointer-events-none">
+                  {currentIndex + 1}
+                </div>
+              )}
+              <Page
+                pageNumber={pageNum}
+                scale={viewMode === "grid" ? 0.3 : zoom}
+                renderTextLayer={viewMode !== "grid"}
+                renderAnnotationLayer={viewMode !== "grid"}
+                onRenderSuccess={hidden ? () => {
+                  if (++incomingRendered.current >= incomingPages.current && incomingPages.current > 0) swapRef.current();
+                } : undefined}
+                loading={<div className="bg-white animate-pulse" style={{ width: (viewMode === "grid" ? 180 : 600 * zoom), height: (viewMode === "grid" ? 240 : 800 * zoom) }} />}
+                className="max-w-full relative"
+              >
+                {!hidden && renderPageOverlay && renderPageOverlay(originalIndex)}
+              </Page>
+            </div>
+          );
+        })}
+      </Document>
+    </div>
+  );
+
   if (!file) return null;
 
   return (
@@ -170,56 +265,10 @@ export function PdfViewer({
             <p className="text-sm max-w-md text-center">{error}</p>
           </div>
         ) : (
-          <Document
-            file={file}
-            onLoadSuccess={onDocumentLoadSuccess}
-            onLoadError={onDocumentLoadError}
-            loading={
-              <div className="flex items-center justify-center py-20 text-slate-500">
-                <span className="animate-pulse">Loading PDF...</span>
-              </div>
-            }
-            className={viewMode === "grid" 
-                ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 pb-24 max-w-5xl mx-auto"
-                : "flex flex-col items-center gap-6 pb-24"}
-            >
-              {(internalPageOrder.length > 0 ? internalPageOrder : Array.from({ length: numPages }, (_, i) => i)).map((originalIndex, currentIndex) => {
-                const pageNum = originalIndex + 1;
-                return (
-                  <div 
-                    key={`page_render_${originalIndex}_${currentIndex}`} 
-                    data-page-number={pageNum}
-                    className={`bg-white shadow-md transition-transform relative ${
-                      viewMode === "grid" 
-                        ? "cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-blue-400"
-                        : ""
-                    } ${draggedIdx === currentIndex ? "opacity-50" : ""}`}
-                    draggable={viewMode === "grid"}
-                    onDragStart={(e) => viewMode === "grid" && handleDragStart(e, currentIndex)}
-                    onDragOver={(e) => {
-                      if (viewMode === "grid") e.preventDefault();
-                    }}
-                    onDrop={(e) => viewMode === "grid" && handleDrop(e, currentIndex)}
-                  >
-                    {viewMode === "grid" && (
-                      <div className="absolute top-2 left-2 bg-black/60 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center z-10 pointer-events-none">
-                        {currentIndex + 1}
-                      </div>
-                    )}
-                    <Page
-                      pageNumber={pageNum}
-                      scale={viewMode === "grid" ? 0.3 : zoom}
-                      renderTextLayer={viewMode !== "grid"}
-                      renderAnnotationLayer={viewMode !== "grid"}
-                      loading={<div className="bg-white animate-pulse" style={{ width: (viewMode === "grid" ? 180 : 600 * zoom), height: (viewMode === "grid" ? 240 : 800 * zoom) }} />}
-                      className="max-w-full relative"
-                    >
-                      {renderPageOverlay && renderPageOverlay(originalIndex)}
-                    </Page>
-                  </div>
-                );
-              })}
-          </Document>
+          <>
+            {renderDoc(preserveScroll ? shown ?? file : file, false)}
+            {incoming && renderDoc(incoming, true)}
+          </>
         )}
       </div>
     </div>

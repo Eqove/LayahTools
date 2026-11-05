@@ -44,12 +44,6 @@ export function WorkspaceHeader({ goHome }: { goHome: () => void }) {
 
       {/* Right: Controls */}
       <div className="flex flex-1 justify-end items-center gap-3">
-        <button className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
-          Export
-        </button>
-        <button className="text-sm font-medium bg-slate-900 text-white px-4 py-1.5 rounded-md hover:bg-slate-800 transition-colors">
-          Save
-        </button>
       </div>
     </header>
   );

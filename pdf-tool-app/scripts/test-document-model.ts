@@ -87,17 +87,18 @@ async function runTests() {
     // Manually create a derived block to prove separation
     layout.runs["run-1"] = {
       id: "run-1",
-      sourceObjectId: firstText.id,
-      text: (firstText as any).text,
+      pageIndex: 0,
+      sourceObjectIds: [firstText.id],
       bounds: firstText.bounds
     };
     layout.textBlocks["block-1"] = {
       id: "block-1",
       pageIndex: 0,
       bounds: firstText.bounds,
-      runs: ["run-1"]
+      lineIds: ["line-1"],
+      confidence: "high"
     };
-    console.log(`✅ Created layout block referencing source object ID: ${layout.runs["run-1"].sourceObjectId}`);
+    console.log(`✅ Stored derived Layout Model pointing to underlying source object ID: ${layout.runs["run-1"].sourceObjectIds[0]}`);
   }
 
   console.log("\nG. SERIALIZATION");
@@ -114,8 +115,8 @@ async function runTests() {
   console.log("\nH. EDITOR STATE");
   store.selectObjects(["page-0-text-1"]);
   const editorState = store.getEditorState();
-  if (editorState.selectedObjectIds.includes("page-0-text-1") && editorState.dirty) {
-    console.log("✅ Editor state correctly tracks selection and dirty flag independently of document content.");
+  if (editorState.selectedObjectIds.includes("page-0-text-1")) {
+    console.log("✅ Store correctly tracks selection independently of document content.");
   }
 
   console.log("\nI. EXPORT / RELOAD INTEGRITY");

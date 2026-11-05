@@ -291,4 +291,22 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
       properties: {},
     }
   },
+  "pdf.edit": {
+    id: "pdf.edit",
+    name: "Edit PDF",
+    category: "organize",
+    supportedInputTypes: ["application/pdf"],
+    supportedOutputTypes: ["application/pdf"],
+    processingEngine: "pdfium",
+    clientServerSuitability: "isomorphic",
+    workerRequirement: "none",
+    isDestructive: true,
+    supportsPreview: true,
+    summary: "Interact with the PDF objects natively.",
+    supportsBatch: false,
+    aiActionSchema: {
+      type: "object",
+      properties: {},
+    }
+  },
 };

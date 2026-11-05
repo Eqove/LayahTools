@@ -57,4 +57,11 @@ export const TOOL_CONFIG: ToolDescriptor[] = [
     acceptsMultiple: false,
     primaryLabel: "Create PDF",
   },
+  {
+    id: "edit",
+    name: "Edit PDF",
+    summary: "Interact with the PDF objects natively.",
+    acceptsMultiple: false,
+    primaryLabel: "Start Editing",
+  },
 ];

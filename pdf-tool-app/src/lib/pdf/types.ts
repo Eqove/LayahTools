@@ -17,7 +17,8 @@ export type PdfToolId =
   | "analyze-structure"
   | "pdf-to-word"
   | "pdf-to-excel"
-  | "extract-tables";
+  | "extract-tables"
+  | "edit";
 
 export type ToolDescriptor = {
   id: PdfToolId;
