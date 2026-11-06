@@ -136,10 +136,53 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       const mod = e.ctrlKey || e.metaKey;
+
+      // Undo / Redo
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+
+      // Select all on current page
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        const st = machine.getState();
+        if (st.activePage !== null && sessionRef.current) {
+          const page = sessionRef.current.store.getPage(st.activePage);
+          if (page) {
+            const allIds = [
+              ...Object.keys(page.layout.runs),
+              ...Object.values(page.objects).filter(o => o.type === "image").map(o => o.id),
+            ];
+            machine.select(allIds, st.activePage);
+            sync();
+          }
+        }
+        return;
+      }
+
+      // Arrow key nudging (move selected objects)
+      const ARROW_KEYS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+      if (ARROW_KEYS.includes(e.key)) {
+        const st = machine.getState();
+        if (st.selectedObjectIds.length > 0 && st.activePage !== null && st.phase === "idle") {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1; // PDF points
+          let dx = 0, dy = 0;
+          if (e.key === "ArrowLeft")  dx = -step;
+          if (e.key === "ArrowRight") dx =  step;
+          if (e.key === "ArrowUp")    dy =  step; // PDF Y goes up
+          if (e.key === "ArrowDown")  dy = -step;
+          const p = st.activePage;
+          const ids = [...st.selectedObjectIds];
+          run("Moving…", s => s.move(p, ids, dx, dy), p);
+        }
+        return;
+      }
+
       if (e.key === "Escape") {
         setTool("select"); setPlacement(null); setPendingImage(null); setEditing(null);
+        machine.reset();
+        sync();
+        return;
       }
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); return; }
       machine.keyDown(e.key);
@@ -147,7 +190,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [machine, status, busy, undo, redo, deleteSelection, sync]);
+  }, [machine, status, busy, undo, redo, deleteSelection, sync, run]);
 
   // ---- toolbar actions ---------------------------------------------------------------------
   const selected = editorState.selectedObjectIds;
@@ -266,7 +309,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
         <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)">Redo</button>
         <span className="w-px h-5 bg-slate-200 mx-1" />
         <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !textRunOnly} onClick={startEdit} title={textRunOnly ? "Edit the selected line of text" : "Select a single line of text to edit it"}>Edit text</button>
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !selected.length} onClick={deleteSelection} title="Delete (Del)">Delete</button>
+        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !selected.length} onClick={deleteSelection} title="Delete selected (Del / Backspace). Arrow keys nudge, Shift+Arrow for 10pt. Ctrl+A selects all.">Delete</button>
         <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !singleObj || singleObj.type !== "image"} onClick={() => resizeSelection(0.9)} title="Make the selected image 10% smaller">Smaller</button>
         <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !singleObj || singleObj.type !== "image"} onClick={() => resizeSelection(1.1)} title="Make the selected image 10% larger">Larger</button>
         <div className="ml-auto flex items-center gap-3">
@@ -412,8 +455,12 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     if (intent?.type === "move") onMove(pageIndex, intent.objectIds, intent.deltaX, intent.deltaY);
   };
 
-  const drag = mine && editorState.phase === "dragging" && editorState.dragStartPoint && editorState.currentPointer
-    ? { x: (editorState.currentPointer.x - editorState.dragStartPoint.x) * ctx.zoom, y: -(editorState.currentPointer.y - editorState.dragStartPoint.y) * ctx.zoom }
+  const dragPt = mine && editorState.phase === "dragging" && editorState.dragStartPoint && editorState.currentPointer
+    ? { x: editorState.currentPointer.x - editorState.dragStartPoint.x, y: editorState.currentPointer.y - editorState.dragStartPoint.y }
+    : null;
+
+  const drag = dragPt
+    ? { x: dragPt.x * ctx.zoom, y: -dragPt.y * ctx.zoom }
     : { x: 0, y: 0 };
 
   const selectedBounds = mine
@@ -421,7 +468,28 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         const o = page.layout.runs[id] ?? page.layout.textBlocks[id] ?? page.objects[id];
         if (!o) return [];
         const b = pdfToViewportBounds(o.bounds, ctx);
-        return [{ id, bounds: { left: b.left + drag.x, right: b.right + drag.x, top: b.top + drag.y, bottom: b.bottom + drag.y } }];
+        let previewText: string | undefined;
+        let objectType: "text" | "image" | "rect" | "other" = "other";
+        if (page.layout.runs[id]) {
+          const run = page.layout.runs[id];
+          previewText = run.sourceObjectIds.map(sid => (page.objects[sid] as LayahTextObject)?.text || "").join(" ").trim();
+          objectType = "text";
+        } else if (page.layout.textBlocks[id]) {
+          objectType = "text";
+          const srcIds = session.resolveSourceIds(pageIndex, [id]);
+          previewText = srcIds.map(sid => (page.objects[sid] as LayahTextObject)?.text || "").join(" ").trim();
+        } else if (page.objects[id]) {
+          const obj = page.objects[id];
+          if (obj.type === "text") {
+            objectType = "text";
+            previewText = (obj as LayahTextObject).text;
+          } else if (obj.type === "image") {
+            objectType = "image";
+          } else {
+            objectType = "other";
+          }
+        }
+        return [{ id, bounds: { left: b.left + drag.x, right: b.right + drag.x, top: b.top + drag.y, bottom: b.bottom + drag.y }, text: previewText, type: objectType }];
       })
     : [];
   const group = selectedBounds.length > 1 ? {
@@ -440,13 +508,25 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     <div
       ref={ref}
       data-testid={`editor-overlay-${pageIndex}`}
-      className={`absolute inset-0 z-50 touch-none ${tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
+      className={`absolute inset-0 z-50 touch-none ${
+        tool === "select"
+          ? editorState.phase === "dragging"
+            ? "cursor-grabbing"
+            : "cursor-default"
+          : "cursor-crosshair"
+      }`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      <SelectionOverlay selectedObjectBounds={selectedBounds} groupSelectionBounds={group} phase={editorState.phase} selectionBox={box} />
+      <SelectionOverlay
+        selectedObjectBounds={selectedBounds}
+        groupSelectionBounds={group}
+        phase={editorState.phase}
+        selectionBox={box}
+        dragDeltaPt={dragPt}
+      />
       {marker && <div className="absolute bg-blue-600 pointer-events-none" style={{ left: marker.left, top: marker.top, width: 2, height: marker.bottom - marker.top }} />}
     </div>
   );

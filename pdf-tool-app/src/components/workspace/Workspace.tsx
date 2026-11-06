@@ -38,7 +38,7 @@ import { compressPdf, ocrPdf } from "@/lib/pdf/heavy-operations";
 import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
 import { pdfToWordCloud, pdfToExcelCloud } from "@/lib/pdf/cloud-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
-import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, type WorkspaceFile } from "@/lib/workspace/files";
+import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, reorderFiles, type WorkspaceFile } from "@/lib/workspace/files";
 
 type StudioResult = {
   filename: string;
@@ -107,6 +107,10 @@ export function Workspace() {
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // File panel drag-to-reorder state
+  const [dragFileId, setDragFileId] = useState<string | null>(null);
+  const [dragOverFileId, setDragOverFileId] = useState<string | null>(null);
+
   // Default to pdf.merge if none selected
   const activeId = activeCapabilityId || "pdf.merge";
   const capability = CAPABILITY_REGISTRY[activeId];
@@ -164,6 +168,10 @@ export function Workspace() {
 
   function removeFile(id: string) {
     setItems((cur) => dropFile(cur, id));
+  }
+
+  function handleFileReorder(fromId: string, toId: string | null) {
+    setItems((cur) => reorderFiles(cur, fromId, toId));
   }
 
   /** Edits replace the bytes of an entry but keep its id, position and active state. */
@@ -476,29 +484,56 @@ export function Workspace() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-3 mb-8">
+            <div className="flex flex-col gap-1 mb-8">
               {items.length > 0 ? items.map((it) => (
                 <div
                   key={it.id}
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragFileId(it.id); }}
+                  onDragEnd={() => { setDragFileId(null); setDragOverFileId(null); }}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverFileId(it.id); }}
+                  onDragLeave={() => setDragOverFileId(null)}
+                  onDrop={(e) => { e.preventDefault(); if (dragFileId && dragFileId !== it.id) handleFileReorder(dragFileId, it.id); setDragFileId(null); setDragOverFileId(null); }}
                   onClick={() => setActiveFileId(it.id)}
                   className={clsx(
-                    "border p-3 rounded-lg flex items-start justify-between group cursor-pointer",
-                    it.id === active?.id ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-100 hover:border-slate-200"
+                    "border p-3 rounded-lg flex items-start justify-between group cursor-pointer transition-all",
+                    dragOverFileId === it.id && dragFileId !== it.id ? "border-blue-400 bg-blue-50 shadow-sm" : "",
+                    dragFileId === it.id ? "opacity-40" : "",
+                    it.id === active?.id && dragFileId !== it.id ? "bg-blue-50 border-blue-200" : !dragOverFileId || dragOverFileId !== it.id ? "bg-slate-50 border-slate-100 hover:border-slate-200" : ""
                   )}
                   aria-current={it.id === active?.id}
                 >
-                  <div className="min-w-0 pr-2">
-                    <p className="text-sm font-medium text-slate-900 truncate" title={it.file.name}>{it.file.name}</p>
-                    <p className="text-xs text-slate-500">
-                      {(it.file.size / 1024 / 1024).toFixed(2)} MB{it.id === active?.id && items.length > 1 ? " · active" : ""}
-                    </p>
+                  {/* Drag handle */}
+                  <div className="flex items-start gap-2 min-w-0 flex-1 pr-2">
+                    <span className="text-slate-300 hover:text-slate-400 cursor-grab active:cursor-grabbing pt-0.5 shrink-0 select-none" title="Drag to reorder">
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M7 2a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM7 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM7 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM17 2a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM17 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM17 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0z" />
+                      </svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900 truncate" title={it.file.name}>{it.file.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {(it.file.size / 1024 / 1024).toFixed(2)} MB{it.id === active?.id && items.length > 1 ? " · active" : ""}
+                      </p>
+                    </div>
                   </div>
-                  <button aria-label={`Remove ${it.file.name}`} onClick={(e) => { e.stopPropagation(); removeFile(it.id); }} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+                  <button aria-label={`Remove ${it.file.name}`} onClick={(e) => { e.stopPropagation(); removeFile(it.id); }} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
               )) : (
                 <p className="text-sm text-slate-500 text-center py-4">No files loaded</p>
+              )}
+              {/* Drop zone at end (move to last position) */}
+              {dragFileId && (
+                <div
+                  className="h-8 rounded-lg border-2 border-dashed border-blue-300 flex items-center justify-center text-xs text-blue-400"
+                  onDragOver={(e) => { e.preventDefault(); setDragOverFileId("__end__"); }}
+                  onDragLeave={() => setDragOverFileId(null)}
+                  onDrop={(e) => { e.preventDefault(); if (dragFileId) handleFileReorder(dragFileId, null); setDragFileId(null); setDragOverFileId(null); }}
+                >
+                  Move to end
+                </div>
               )}
             </div>
 
@@ -626,7 +661,14 @@ function ToolFields({
     );
   }
 
-  if (activeTool === "merge") return null;
+  if (activeTool === "merge") {
+    return (
+      <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 p-3 rounded-md">
+        <strong className="block mb-1">File order determines merge order.</strong>
+        Drag the files in the Files panel (right sidebar) to set the order before running.
+      </div>
+    );
+  }
 
   if (activeTool === "rearrange") {
     return (
