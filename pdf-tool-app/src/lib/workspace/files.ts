@@ -34,3 +34,22 @@ export const replaceFile = (items: WorkspaceFile[], id: string, file: File) =>
 /** The active entry, falling back to the first if the active one was removed. */
 export const resolveActive = (items: WorkspaceFile[], activeId: string | null) =>
   items.find((i) => i.id === activeId) ?? items[0];
+
+/**
+ * Move a file entry from one position to another.
+ * fromId: the id of the file being dragged.
+ * toId: the id of the file it's dropped onto (insert before it).
+ * If toId is null, move to end.
+ */
+export function reorderFiles(items: WorkspaceFile[], fromId: string, toId: string | null): WorkspaceFile[] {
+  const fromIdx = items.findIndex(i => i.id === fromId);
+  if (fromIdx === -1) return items;
+  const moved = items[fromIdx];
+  const without = items.filter(i => i.id !== fromId);
+  if (toId === null) return [...without, moved];
+  const toIdx = without.findIndex(i => i.id === toId);
+  if (toIdx === -1) return [...without, moved];
+  const result = [...without];
+  result.splice(toIdx, 0, moved);
+  return result;
+}

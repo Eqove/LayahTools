@@ -25,10 +25,15 @@ export function WorkspaceShell() {
         </>
       )}
       <button 
-        onClick={() => setWorkspaceActive(true)}
-        className="bg-layah-primary text-white px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-blue-600 transition-colors shadow-sm flex items-center gap-2"
+        onClick={() => activeFormat === "pdf" && setWorkspaceActive(true)}
+        disabled={activeFormat !== "pdf"}
+        className="bg-layah-primary text-white px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-blue-600 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Start working <span>&rarr;</span>
+        {activeFormat === "pdf" ? (
+          <>Start working <span>&rarr;</span></>
+        ) : (
+          <>Coming soon</>
+        )}
       </button>
     </div>
   );

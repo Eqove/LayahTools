@@ -2,3 +2,8 @@
 .next
 .next-prod
 node_modules
+
+# Agent Memory
+MEMORY.md
+.agent-memory/
+
