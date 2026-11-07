@@ -31,18 +31,8 @@ export interface SelectionOverlayProps {
   dragDeltaPt?: { x: number; y: number } | null;
 }
 
-/** Small resize/corner handle dot */
-function CornerHandle({ style }: { style: React.CSSProperties }) {
-  return (
-    <div
-      className="absolute w-2.5 h-2.5 bg-white border-2 border-blue-600 rounded-sm pointer-events-none"
-      style={{ ...style, transform: "translate(-50%, -50%)" }}
-    />
-  );
-}
-
 /**
- * Renders absolutely positioned bounding boxes and selection handles
+ * Renders absolutely positioned bounding boxes, drag ghost and marquee
  * over the PDF.js viewport.
  */
 export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
@@ -140,20 +130,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
         </div>
       )}
 
-      {/* 5. Corner handles (shown when anything is selected and not mid-drag) */}
-      {handleBounds && !isDragging && phase !== "selecting" && (
-        <>
-          <CornerHandle style={{ left: handleBounds.left, top: handleBounds.top }} />
-          <CornerHandle style={{ left: handleBounds.right, top: handleBounds.top }} />
-          <CornerHandle style={{ left: handleBounds.left, top: handleBounds.bottom }} />
-          <CornerHandle style={{ left: handleBounds.right, top: handleBounds.bottom }} />
-          {/* Mid-side handles */}
-          <CornerHandle style={{ left: (handleBounds.left + handleBounds.right) / 2, top: handleBounds.top }} />
-          <CornerHandle style={{ left: (handleBounds.left + handleBounds.right) / 2, top: handleBounds.bottom }} />
-          <CornerHandle style={{ left: handleBounds.left, top: (handleBounds.top + handleBounds.bottom) / 2 }} />
-          <CornerHandle style={{ left: handleBounds.right, top: (handleBounds.top + handleBounds.bottom) / 2 }} />
-        </>
-      )}
+      {/* Resize handles intentionally not rendered: they were non-interactive. Re-add with real resize (P2). */}
 
       {/* 6. Rubber-band marquee (while selecting) */}
       {phase === "selecting" && selectionBox && (
