@@ -1,8 +1,13 @@
 # LayahTools Development Log
 
 Running log of state, decisions and open issues. Architecture lives in `LAYAH_ARCHITECTURE.md`; rules for agents in
-`CLAUDE.md`. Planning documents (repo root, currently untracked): `../1_LayahTools_PDF_Workspace_Checklist.md`,
-`../2_Beta_Plan_ClaudeCode.md`, `../3_Alpha_Plan_Antigravity.md`, `../LayahTools_Development_Phases.md`.
+`CLAUDE.md` (project-wide rules are in the repository-root `CLAUDE.md`).
+
+**Local-only planning documents.** The founder keeps seven planning files at the git root:
+`1_LayahTools_PDF_Workspace_Checklist.md`, `2_Beta_Plan_ClaudeCode.md`, `3_Alpha_Plan_Antigravity.md`,
+`LayahTools_Development_Phases.md`, `LayahTools_Master_Context.md`, `LayahTools_Project_Handover.md` and `.docx`.
+They are **untracked and not in the repository**; a clone will not have them. This log cites their item IDs (A-1.1,
+P0-P2, "checklist 2.1") only as references to those local files.
 
 ## Phase 0 (audit and baseline) - current state
 
@@ -23,7 +28,12 @@ Running log of state, decisions and open issues. Architecture lives in `LAYAH_AR
 | D-02 | Annotated tag `baseline-phase0-2fc5270`; leave `known-good-pre-integration` | Done |
 | D-03 | Write `CLAUDE.md`, update `LAYAH_ARCHITECTURE.md` (6px threshold, CDN deps, Alpha/Beta, links, limitations) | Done (this commit) |
 | D-04 | Hide the 8 cosmetic handles now; defer nudge/history coalescing to P2 with local drag preview; no P2 before P1 acceptance | Handles removed; coalescing deferred |
-| D-05 | Investigate lockfile and `MEMORY.md` before acting | Investigated; **decision needed** (below) |
+| D-05 | Investigate lockfile and `MEMORY.md` before acting | Investigated; resolved in housekeeping (D-06, D-07) |
+| D-06 | Keep the npm 11.13.0 lockfile; pin `packageManager: npm@11.13.0`; no dependency changes | Done (housekeeping commit) |
+| D-07 | `MEMORY.md` is private agent memory: untrack (`git rm --cached`), keep file locally, keep ignore rule | Done (housekeeping commit) |
+| D-08 | Planning files stay untracked and untouched; docs state they are local-only | Done (housekeeping commit) |
+| D-09 | Primary `CLAUDE.md` moved to the git root; app-specific notes stay in `pdf-tool-app/CLAUDE.md` | Done (housekeeping commit) |
+| D-10 | A-1.1 FILES reorder stays OPEN pending a human mouse test; no speculative fix | Open |
 
 ## D-04: handles removed
 `SelectionOverlay.tsx` no longer renders the 8 corner/mid-side boxes (they were `pointer-events-none`) nor the
@@ -44,8 +54,11 @@ keyboard code were not touched. `tsc` clean.
   netlify/vercel config), so the effect is currently theoretical.
 - Check: `npm install --package-lock-only --dry-run` with npm 11.13.0 reports "up to date" and left the file untouched,
   so the current lockfile is valid for installs; it just isn't what npm 11 would write.
-- **Not reverted.** Options: (a) restore the npm-11 lockfile from `44b5991` and agree one npm version for the team,
-  (b) keep as is. Recommendation: (a) plus a `packageManager`/`engines` pin, as one deliberate commit.
+- **Decision (D-06): keep the current lockfile, do not restore `44b5991`.** `packageManager: "npm@11.13.0"` added to
+  `package.json`; no dependency versions changed. Verification after the change: `npm ci --dry-run` and
+  `npm install --package-lock-only --dry-run` both report up to date, and `package-lock.json` is byte-identical
+  (md5 `2b0f1485e1847ad049cbe550d7e5551e` before and after). A full clean `npm ci` into an empty folder was not run.
+  Note: the lockfile still lacks the `libc` hints, so teammates should install with npm 11.13.0 to avoid churn.
 
 ### MEMORY.md
 - Added to the repo root by teammate `aravindh13` in `44b5991` ("phase 7 completed"); 196 lines, titled "System Memory
@@ -54,9 +67,10 @@ keyboard code were not touched. `tsc` clean.
   already tracked, so the ignore has no effect, and the file contains the teammate's absolute local paths
   (`c:/Users/Lenovo/Downloads/...`).
 - Content overlaps the architecture docs and records Phase 7 as done, including "File drag-to-reorder" (see A-1.1 below).
-- **Left untouched** (not deleted, not untracked). **Decision needed from founder/teammate:** shared project context
-  (then commit it intentionally, remove the ignore entry, strip local paths) or private working context (then
-  `git rm --cached MEMORY.md`, keep the ignore).
+- **Decision (D-07): private agent memory.** Removed from the index with `git rm --cached MEMORY.md`; the local file is
+  intact (md5 `4d28b38d9bebbf75e7dfd466d5343800` before and after) and `git check-ignore` confirms both `.gitignore`
+  rules match it. It remains in git history at `44b5991`/`2fc5270` (history not rewritten), so its contents, including
+  the teammate's local paths, are still visible in old commits. Treat its claims (e.g. "reorder implemented") as unverified.
 
 ## A-1.1 (FILES reorder): NOT accepted
 Verified, not assumed. Environment: dev server at `develop`, three PDFs loaded in Merge.
@@ -83,8 +97,9 @@ Verified, not assumed. Environment: dev server at `develop`, three PDFs loaded i
 | 1 | Merge-order note unreachable (`Workspace.tsx:576`) | Open (Alpha, P1) |
 | 2 | 8 non-functional resize handles | **Fixed** (removed) |
 | 3 | Arrow-nudge = full mutation + snapshot per keypress | Deferred to P2 (D-04) |
-| 4 | Lockfile lost `libc` hints | Investigated; decision pending (D-05) |
-| 5 | `MEMORY.md` tracked and ignored | Investigated; decision pending (D-05) |
+| 4 | Lockfile lost `libc` hints | Kept; npm pinned to 11.13.0 (D-06) |
+| 5 | `MEMORY.md` tracked and ignored | Untracked, kept locally (D-07) |
+| 5b | `pdf-tool-app/.next-build/` has 109 tracked build-output files | Open (found during housekeeping; not touched) |
 | 6 | No tests for Phase 7 code (`reorderFiles`, overlay, shortcuts) | Open |
 | 7 | Ctrl+A always prevents default; selects nothing before a page is clicked | Open (P2) |
 | 8 | Keydown listener re-registered every render (`run` identity) | Open, minor |
@@ -97,15 +112,22 @@ Verified, not assumed. Environment: dev server at `develop`, three PDFs loaded i
 
 ## Unresolved / needs a human
 1. Physical mouse/trackpad acceptance test of the editor and FILES reorder (checklist P0), in the browser the founder used.
-2. D-05 lockfile: restore from `44b5991` + pin npm, or keep?
-3. D-05 `MEMORY.md`: shared or private?
-4. Planning files at repo root are untracked: commit them, or keep local? Docs link to them.
-5. Scanned and password-protected PDFs still unvalidated end to end.
-6. `npm run lint` not run in this phase.
+2. Decide whether to remove the tracked `pdf-tool-app/.next-build/` build output (109 files) from the index.
+3. A-1.1 FILES reorder: needs a human mouse test (and a decision on browser support) before it can be closed.
+4. Scanned and password-protected PDFs still unvalidated end to end.
+5. `npm run lint` not run in this phase.
 
 ## Next gate
 P1 (Workspace stability, checklist 2.1) is **not started**. P2 does not begin until P1 acceptance.
 
-## Changed in the Phase 0 documentation commit
+## Changed in the Phase 0 documentation commit (`3b1ba16`)
 `CLAUDE.md` (rewritten), `LAYAH_ARCHITECTURE.md` (updated), `DEVELOPMENT_LOG.md` (new),
 `src/components/pdf/interactive/SelectionOverlay.tsx` (handles removed). Untracked root files left untouched.
+
+## Changed in the Phase 0 housekeeping commit
+- `package.json`: added `"packageManager": "npm@11.13.0"` (no dependency changes; `package-lock.json` unchanged).
+- `MEMORY.md`: removed from the index only (local file preserved, still ignored).
+- `CLAUDE.md` (git root, new): project-wide rules. `pdf-tool-app/CLAUDE.md`: reduced to app-specific notes.
+- `LAYAH_ARCHITECTURE.md`, `DEVELOPMENT_LOG.md`: planning documents now stated as local-only and untracked; decisions
+  D-06 to D-10 recorded.
+- The seven untracked planning files were not touched (checksums verified before and after).
