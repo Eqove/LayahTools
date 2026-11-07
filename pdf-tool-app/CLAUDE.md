@@ -29,5 +29,5 @@ npx tsx scripts/<name>.ts   # older model/interaction diagnostics, run individua
 ## App-specific rules
 - Next 16 has breaking changes versus older versions: read `node_modules/next/dist/docs/` before framework code.
 - `public/pdfium.wasm` is copied, not hand-edited; it changes only when `@embedpdf/pdfium` does.
-- `pdf-tool-app/.next-build/` contains tracked build output (109 files). Don't edit it; cleanup is an open item in
-  `DEVELOPMENT_LOG.md`.
+- Build output (`.next/`, `.next-prod/` which is the configured `distDir`, and the stale `.next-build/`) is gitignored.
+  Never commit it.

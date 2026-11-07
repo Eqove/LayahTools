@@ -99,7 +99,7 @@ Verified, not assumed. Environment: dev server at `develop`, three PDFs loaded i
 | 3 | Arrow-nudge = full mutation + snapshot per keypress | Deferred to P2 (D-04) |
 | 4 | Lockfile lost `libc` hints | Kept; npm pinned to 11.13.0 (D-06) |
 | 5 | `MEMORY.md` tracked and ignored | Untracked, kept locally (D-07) |
-| 5b | `pdf-tool-app/.next-build/` has 109 tracked build-output files | Open (found during housekeeping; not touched) |
+| 5b | `pdf-tool-app/.next-build/` had 109 tracked build-output files (stale `distDir`) | **Fixed**: untracked, gitignored, local files kept |
 | 6 | No tests for Phase 7 code (`reorderFiles`, overlay, shortcuts) | Open |
 | 7 | Ctrl+A always prevents default; selects nothing before a page is clicked | Open (P2) |
 | 8 | Keydown listener re-registered every render (`run` identity) | Open, minor |
@@ -112,10 +112,9 @@ Verified, not assumed. Environment: dev server at `develop`, three PDFs loaded i
 
 ## Unresolved / needs a human
 1. Physical mouse/trackpad acceptance test of the editor and FILES reorder (checklist P0), in the browser the founder used.
-2. Decide whether to remove the tracked `pdf-tool-app/.next-build/` build output (109 files) from the index.
-3. A-1.1 FILES reorder: needs a human mouse test (and a decision on browser support) before it can be closed.
-4. Scanned and password-protected PDFs still unvalidated end to end.
-5. `npm run lint` not run in this phase.
+2. A-1.1 FILES reorder: needs a human mouse test (and a decision on browser support) before it can be closed.
+3. Scanned and password-protected PDFs still unvalidated end to end.
+4. `npm run lint` not run in this phase.
 
 ## Next gate
 P1 (Workspace stability, checklist 2.1) is **not started**. P2 does not begin until P1 acceptance.
