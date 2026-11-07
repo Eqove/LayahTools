@@ -137,9 +137,10 @@ Three statuses, kept separate.
 
 | Status | State |
 |---|---|
-| **Implementation** | Done on `develop` (commit recorded below) |
+| **Implementation** | Done on `develop`, commit `e3d428e` |
 | **Automated test coverage** | 62 new checks, `npm test` 160/160 PASS; build passes |
 | **Human acceptance** | **Not done.** No physical mouse/trackpad test; real touch/pen cancel never exercised |
+| **Founder decision** | B-1.1 accepted as implementation-complete and automated-test-complete. The editor interaction layer is **not** human-validated |
 
 **Seam.** New pure module `src/lib/document/gestures.ts` (no React/DOM/session). `EditorController`'s page overlay now only
 translates events into `gestureDown/Move/Up/Cancel` and `selectAllOnPage`; hit-testing candidates and the marquee code moved
@@ -179,3 +180,36 @@ lostpointercapture mid-drag removed the drag ghost and left Undo disabled (no hi
 - Arrow-key nudge still makes one full mutation + snapshot per keypress (P2, untouched). Marquee threshold is still 4 PDF
   points, not screen pixels (pre-existing). Escape clears selection via `machine.reset()` in the controller (not in the seam).
 - A-1.1 FILES reorder remains OPEN (untouched).
+
+## B-1.2: freeze the `EditorSession` public API (inspection and proposal only)
+
+| Status | State |
+|---|---|
+| **Implementation** | **Not started.** No code changed. Proposed contract was presented for review; it is saved to the repo only after approval |
+| **Automated verification** | None yet for the contract. Evidence below comes from a read-only scratch probe and code reading |
+| **Human acceptance** | Not applicable until implemented |
+
+Inspection findings (probe = scratch script outside the repo, run against the real session and `double coloumn sample.pdf`):
+- Surface today: `open`, `dispose`, `bytes`, `store`, `generation`, `canUndo/canRedo`, `uneditableReason`, `resolveSourceIds`,
+  `layoutIdsFor`, `textEditWarning`, `move/remove/replaceText/addText/addImage/addRect/resize`, `undo/redo`, `FontCoverageError`.
+  The only production consumer is `EditorController`; Alpha code (FILES, Workspace) only sees `File` objects.
+- `store` is returned mutable: a caller can inject objects into the live model (probe 9), the store is replaced by a new
+  object on every mutation (8), and `generation` can be assigned from outside (10).
+- `dispose()` is not terminal: `undo()` after dispose returned `true` and reloaded a PDFium document nobody will free (13);
+  mutations after dispose fail with a misleading "no longer part of the document" (12).
+- Page-index errors are inconsistent: `resolveSourceIds(99)` returns `[]` (3), `replaceText(99)` says "no editable text" (4),
+  `addText(99)` surfaces an engine message (5). Errors other than `FontCoverageError` are plain `Error` with English text.
+- Calls made before a successful `open` fail with "Nothing to move" (16). `open()` twice silently resets history (17) but is not
+  used by production (one session per file).
+- History cap of 20 confirmed (18). `store.editorState` (selection copy inside the model store) is not used by the controller.
+- Two concurrent mutations both succeeded with consistent counts (7): no corruption reproduced, but nothing serialises them.
+- From code reading only (not exercised): `undo/redo` mutate the stacks before the reload and are not atomic if the reload
+  fails; a failed `open()` on an already-open session leaves the old model without an engine document; a rollback reload
+  that itself fails has no defined session state.
+
+Decisions needed before implementation are listed in the review report (failed-open semantics, post-dispose reads, queue vs
+reject for concurrent calls, error-code taxonomy, `store` deprecation, return-shape normalisation timing).
+
+**Roadmap sync (local-only plan, not edited here):** in `2_Beta_Plan_ClaudeCode.md`, B-1.1 can be marked done with the note
+"implementation + automated tests complete, human acceptance outstanding"; B-1.2 is in progress (inspection and proposal done,
+awaiting approval).
