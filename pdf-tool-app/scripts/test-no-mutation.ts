@@ -27,6 +27,7 @@ const check = (name: string, ok: boolean, detail = "") => {
   if (!ok) failed++;
 };
 const wasm = () => new Uint8Array(fs.readFileSync("node_modules/@embedpdf/pdfium/dist/pdfium.wasm")).buffer as ArrayBuffer;
+const same = (a: Uint8Array, b: Uint8Array) => Buffer.compare(a, b) === 0;
 const fx = (n: string) => new Uint8Array(fs.readFileSync(path.join("tests", "fixtures", "pdfs", n)));
 
 const ORIGIN = { left: 40, top: 60 }; // where the overlay sits in the viewport; proves client->page conversion is used
@@ -35,7 +36,7 @@ const ORIGIN = { left: 40, top: 60 }; // where the overlay sits in the viewport;
 class Driver {
   machine = new InteractionStateMachine();
   constructor(public session: EditorSession, public pageIndex: number, public zoom: number) {}
-  get page() { return this.session.store.getPage(this.pageIndex)!; }
+  get page() { return this.session.getPage(this.pageIndex); }
   get ctx(): PageCoordinateContext { return { width: this.page.width, height: this.page.height, zoom: this.zoom, rotation: 0 }; }
   pt(cx: number, cy: number) { return viewportToPdfPoint({ x: cx - ORIGIN.left, y: cy - ORIGIN.top }, this.ctx); }
   client(x: number, y: number) { const v = pdfToViewportPoint({ x, y }, this.ctx); return { x: v.x + ORIGIN.left, y: v.y + ORIGIN.top }; }
@@ -55,7 +56,7 @@ class Driver {
 
 /** A run whose centre actually hits itself (not shadowed by a smaller overlapping object). */
 function pickRuns(session: EditorSession, pageIndex: number, n: number) {
-  const page = session.store.getPage(pageIndex)!;
+  const page = session.getPage(pageIndex);
   const out: { id: string; cx: number; cy: number }[] = [];
   for (const r of Object.values(page.layout.runs)) {
     const cx = (r.bounds.left + r.bounds.right) / 2, cy = (r.bounds.bottom + r.bounds.top) / 2;
@@ -66,7 +67,7 @@ function pickRuns(session: EditorSession, pageIndex: number, n: number) {
 }
 /** A point on the page that hits nothing. */
 function emptyPoint(session: EditorSession, pageIndex: number) {
-  const page = session.store.getPage(pageIndex)!;
+  const page = session.getPage(pageIndex);
   for (let y = page.height - 12; y > 12; y -= 9) for (let x = 12; x < page.width - 12; x += 9) {
     if (hitTestPoint({ x, y }, hitCandidates(page)) === null) return { x, y };
   }
@@ -80,7 +81,7 @@ async function main() {
   const s = new EditorSession();
   await s.open(fx("double coloumn sample.pdf"), wasm());
   {
-    const page = s.store.getPage(0)!;
+    const page = s.getPage(0);
     let spot = { x: 0, y: 0 };
     outer: for (let y = 20; y < page.height - 100; y += 10) for (let x = 20; x < page.width - 130; x += 10) {
       const corners = [[x, y], [x + 60, y], [x, y + 40], [x + 60, y + 40], [x + 30, y + 20]];
@@ -96,7 +97,7 @@ async function main() {
 
   const [runA, runB] = pickRuns(s, 0, 2);
   const emptyP = emptyPoint(s, 0);
-  const imageObj = Object.values(s.store.getPage(0)!.objects).find(o => o.type === "image")!;
+  const imageObj = Object.values(s.getPage(0).objects).find(o => o.type === "image")!;
   console.log(`threshold=${DRAG_THRESHOLD_PX}px  no-op tolerance=${NOOP_MOVE_TOLERANCE_PX}px  runA=${runA.id} runB=${runB.id} image=${imageObj.id}`);
 
   // ---------- pointer down/up, empty space, shift, select-all, selection kinds ----------
@@ -130,7 +131,7 @@ async function main() {
     check("  ...selected the image", d.state.selectedObjectIds.join() === imageObj.id);
 
     // paragraph/block: a point inside a block but outside every run
-    const page = s.store.getPage(0)!;
+    const page = s.getPage(0);
     let blockHit: { x: number; y: number; id: string } | null = null;
     for (const b of Object.values(page.layout.textBlocks)) {
       for (let y = b.bounds.bottom + 1; y < b.bounds.top && !blockHit; y += 2) for (let x = b.bounds.left + 1; x < b.bounds.right && !blockHit; x += 3) {
@@ -303,6 +304,8 @@ async function main() {
   console.log("\n== positive controls: instrumentation must detect real mutations");
   {
     const d = new Driver(s, 0, 1);
+    // ids carry the generation: after each committed edit/undo re-stamp the same objects (undo restores the same layout)
+    const cur = (id: string) => id.replace(/@\d+$/, "@" + s.generation);
     const srcIds = s.resolveSourceIds(0, [runA.id]);
     const k = srcIds.length;
 
@@ -320,7 +323,7 @@ async function main() {
 
     // controlled violation 2: a selection-time mutation (what a regression would look like) is detected
     let caught2 = false;
-    try { await probe.assertUnchanged("selection that mutates", async () => { await s.move(0, [runA.id], 0.5, 0); }); } catch { caught2 = true; }
+    try { await probe.assertUnchanged("selection that mutates", async () => { await s.move(0, [cur(runA.id)], 0.5, 0); }); } catch { caught2 = true; }
     check("controlled violation: a mutation hidden inside a 'selection' IS detected", caught2);
     await s.undo();
 
@@ -335,21 +338,21 @@ async function main() {
     check("drag-move intent produced", intent?.type === "move");
     check(`drag-move: engine.moveObject +${k}, transformObject +${k}`, delta("engine.moveObject") === k && delta("engine.transformObject") === k, `+${delta("engine.moveObject")}/+${delta("engine.transformObject")}`);
     check("drag-move: exactly 1 export and 1 reload", delta("engine.export") === 1 && delta("engine.load") === 1 && delta("pdfium.FPDF_SaveAsCopy") === 1 && delta("pdfium.FPDF_LoadMemDocument") === 1);
-    check("drag-move: generation +1, history +1, bytes replaced", after.generation === before.generation + 1 && after.past === before.past + 1 && after.bytes !== before.bytes);
+    check("drag-move: generation +1, history +1, bytes replaced", after.generation === before.generation + 1 && after.past === before.past + 1 && !same(after.bytes, before.bytes));
     check("drag-move: raw PDFium Transform +" + k, delta("pdfium.FPDFPageObj_Transform") === k);
 
     // nudge (arrow key = session.move by 1pt)
     before = probe.snapshot();
-    await s.move(0, s.layoutIdsFor(0, srcIds), 1, 0); // ids are re-derived after the drag's reload; follow the source objects
+    await s.move(0, s.layoutIdsFor(0, srcIds.map(cur)), 1, 0); // ids are re-derived after the drag's reload; follow the source objects
     after = probe.snapshot();
     check("nudge (1pt move): same counters as a move", delta("engine.moveObject") === k && delta("engine.export") === 1 && delta("engine.load") === 1 && after.past === before.past + 1 && after.generation === before.generation + 1);
 
     // delete
     before = probe.snapshot();
-    await s.remove(0, [Object.values(s.store.getPage(0)!.layout.runs)[0].id]);
+    await s.remove(0, [Object.values(s.getPage(0).layout.runs)[0].id]);
     after = probe.snapshot();
     check("delete: deleteObject >= 1, 1 export, 1 reload, history +1, bytes replaced",
-      delta("engine.deleteObject") >= 1 && delta("pdfium.FPDFPage_RemoveObject") === delta("engine.deleteObject") && delta("engine.export") === 1 && delta("engine.load") === 1 && after.past === before.past + 1 && after.bytes !== before.bytes,
+      delta("engine.deleteObject") >= 1 && delta("pdfium.FPDFPage_RemoveObject") === delta("engine.deleteObject") && delta("engine.export") === 1 && delta("engine.load") === 1 && after.past === before.past + 1 && !same(after.bytes, before.bytes),
       `deleteObject +${delta("engine.deleteObject")}`);
 
     // undo
@@ -357,7 +360,7 @@ async function main() {
     await s.undo();
     after = probe.snapshot();
     check("undo: 1 reload, 0 exports, history -1 / redo +1, bytes replaced",
-      delta("engine.load") === 1 && delta("engine.export") === 0 && after.past === before.past - 1 && after.future === before.future + 1 && after.bytes !== before.bytes);
+      delta("engine.load") === 1 && delta("engine.export") === 0 && after.past === before.past - 1 && after.future === before.future + 1 && !same(after.bytes, before.bytes));
   }
 
   // ---------- state machine usable after everything ----------
@@ -370,7 +373,7 @@ async function main() {
     check("machine still works after the whole run", d.state.phase === "idle" && d.state.selectedObjectIds.join() === fresh.id);
   }
 
-  s.dispose();
+  await s.dispose();
   console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
   process.exit(failed ? 1 : 0);
 }

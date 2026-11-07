@@ -9,7 +9,7 @@
  *                 addImage, addRect, export, load)
  *  - pdfium.*   : raw PDFium calls that change or serialise the document (GenerateContent, Transform, RemoveObject,
  *                 InsertObject, SetText, SaveAsCopy, LoadMemDocument, CloseDocument)
- * plus session.generation (bumps on every reload), history length (past/future) and document byte identity.
+ * plus session.generation (bumps on every committed state), history length (past/future) and document byte content.
  */
 
 const ENGINE_METHODS = ["replaceText", "moveObject", "transformObject", "deleteObject", "addText", "addImage", "addRect", "export", "load"];
@@ -63,7 +63,7 @@ export function instrumentSession(session: any): Probe {
     if (a.generation !== b.generation) out.push(`generation: ${a.generation} -> ${b.generation}`);
     if (a.past !== b.past) out.push(`history(past): ${a.past} -> ${b.past}`);
     if (a.future !== b.future) out.push(`history(future): ${a.future} -> ${b.future}`);
-    if (a.bytes !== b.bytes) out.push("document bytes: replaced");
+    if (Buffer.compare(a.bytes, b.bytes) !== 0) out.push("document bytes: changed"); // session.bytes is a copy, so compare content
     return out;
   };
   return {

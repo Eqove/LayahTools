@@ -181,13 +181,13 @@ lostpointercapture mid-drag removed the drag ghost and left Undo disabled (no hi
   points, not screen pixels (pre-existing). Escape clears selection via `machine.reset()` in the controller (not in the seam).
 - A-1.1 FILES reorder remains OPEN (untouched).
 
-## B-1.2: freeze the `EditorSession` public API (inspection and proposal only)
+## B-1.2: freeze the `EditorSession` public API
 
 | Status | State |
 |---|---|
-| **Implementation** | **Not started.** No code changed. Proposed contract was presented for review; it is saved to the repo only after approval |
-| **Automated verification** | None yet for the contract. Evidence below comes from a read-only scratch probe and code reading |
-| **Human acceptance** | Not applicable until implemented |
+| **Implementation** | **Done on `develop`** (contract Revision 2 approved by the founder; commit recorded in the B-1.2 commit message). See "Implemented contract" below |
+| **Automated verification** | New `scripts/test-session-contract.ts` (99 checks); full `npm test` 259 PASS / 0 FAIL; `tsc --noEmit` clean. `npm run build` not run (master-phase gate) |
+| **Human acceptance** | **Not done.** `EditorController` was changed (page access, `open` options) but not exercised in a browser or with a real mouse |
 
 Inspection findings (probe = scratch script outside the repo, run against the real session and `double coloumn sample.pdf`):
 - Surface today: `open`, `dispose`, `bytes`, `store`, `generation`, `canUndo/canRedo`, `uneditableReason`, `resolveSourceIds`,
@@ -213,3 +213,42 @@ reject for concurrent calls, error-code taxonomy, `store` deprecation, return-sh
 **Roadmap sync (local-only plan, not edited here):** in `2_Beta_Plan_ClaudeCode.md`, B-1.1 can be marked done with the note
 "implementation + automated tests complete, human acceptance outstanding"; B-1.2 is in progress (inspection and proposal done,
 awaiting approval).
+
+### Implemented contract (B-1.2)
+- **Lifecycle:** `status` is `empty | ready | faulted | disposed`. `open()` only from `empty` (else `ALREADY_OPEN`); a failed open leaves
+  the session `empty` and reusable. `dispose()` is terminal, idempotent, returns one shared promise; queued work rejects `DISPOSED`, the
+  in-flight step finishes but its result is discarded, then the engine is freed. Reads of the last committed model keep working.
+- **Bytes:** `open()` copies its input unless `{ transfer: true }` (the controller transfers its fresh array). `bytes` returns a copy.
+  No `copyBytes`/`toFile`/`digest`.
+- **Ids and generation:** `generation` is session-monotonic, never restored by undo/redo, +1 per committed mutation/undo/redo, not changed
+  by a rolled-back failure. Every id (objects, runs, blocks; line ids embed the object stamp) ends in `@<generation>`; an id from another
+  generation throws `STALE_ID` (`details.reason` `generation` or `unknown`), a malformed one `INVALID_ARGUMENT`. Reproduced and closed the
+  inspection hazard: a stale id used to move a different object silently.
+- **Dirty state:** separate from generation and bytes. Each committed state has an identity; undo/redo restore the identity of the state
+  they load, a new edit gets a new one. `isDirty` = current identity differs from the clean one; `markClean()` moves it. Evicting the clean
+  state from the 20-entry history leaves the session dirty.
+- **Model:** `store` is internal. `getPage()` returns a deeply frozen `DeepReadonly<LayahPage>` (frozen at commit); `pageCount`, `history`
+  (`undoDepth/redoDepth/limit`) added. Gesture seam parameters widened to `DeepReadonly<LayahPage>`.
+- **Concurrency:** FIFO queue over open/mutations/undo/redo; preconditions checked when an operation runs; failures never poison the
+  queue; reads are synchronous and see committed state only. Reentrancy: a call made synchronously inside an engine call fails with
+  `REENTRANT_CALL` (see ledger BL-005 for the limit).
+- **Transactions:** validate -> apply -> export -> reload and stage -> verify -> atomic commit; success = one export, one reload, one history
+  entry. Failure rolls the engine back to the committed bytes (model, bytes, ids, generation, history untouched) and throws
+  `ENGINE_FAILURE{phase}` or `FONT_COVERAGE`; a failed rollback sets `faulted` and throws `ROLLBACK_FAILED{cause, rollbackCause}`. Undo/redo
+  move their stacks only after a successful reload.
+- **Errors:** `EditorSessionError(code, message, {cause, details})`; `FontCoverageError` is now a subclass (same fields). Codes:
+  `ALREADY_OPEN NOT_OPEN DISPOSED SESSION_FAULTED PASSWORD_REQUIRED OPEN_FAILED INVALID_ARGUMENT STALE_ID NOTHING_TO_DO UNEDITABLE_PAGE
+  FONT_COVERAGE ENGINE_FAILURE ROLLBACK_FAILED REENTRANT_CALL`. Page-index errors are `INVALID_ARGUMENT` everywhere, including pure reads.
+- **Engine injection:** types-only `EditorEngine` (`engine-contract.ts`), `new EditorSession({ engineFactory })`; `PdfEditorEngine implements
+  EditorEngine` and `load` throws typed `EngineError` (`password | format`).
+- **Mutation signatures and return shapes are unchanged.**
+
+Breaking changes for existing consumers: `store` removed; ids carry `@generation`; `bytes` is a copy; second `open` throws; page-index
+errors are `EditorSessionError`; mutating calls reject on stale ids. Only `EditorController` consumed the session (updated). Existing
+tests were ported (ids re-read or re-stamped after state changes, bytes compared by content); no check was removed.
+
+Tests: `scripts/test-session-contract.ts` with `scripts/lib/engine-doubles.ts` (interface-level counting, fault-injection, call gating;
+no private access). The B-1.1 raw PDFium counters in `mutation-probe.ts` are kept (only the byte comparison now uses content).
+Sanity check: two guards were broken on purpose and the suite failed each time (generation check off: 1 check failed, because the stamp
+alone already makes old ids unresolvable; rollback no longer faulting: 3 checks failed); the file was restored byte-identical. Not covered:
+no browser run, no exhaustive mutation testing.

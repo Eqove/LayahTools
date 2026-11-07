@@ -98,6 +98,9 @@ export interface LayahPage {
   layout: LayahLayout;
 }
 
+/** Recursively read-only view; `EditorSession.getPage()` returns pages typed this way (and frozen at runtime). */
+export type DeepReadonly<T> = T extends (infer U)[] ? readonly DeepReadonly<U>[] : T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
+
 export interface LayahDocument {
   id: string;
   pages: Record<number, LayahPage>;

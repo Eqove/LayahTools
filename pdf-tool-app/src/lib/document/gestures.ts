@@ -2,7 +2,10 @@ import type { PdfPoint } from "./coordinates";
 import { hitTestPoint } from "./hittest";
 import type { InteractionStateMachine } from "./interaction";
 import type { EditorMutationIntent } from "./mutation";
-import type { LayahPage } from "./types";
+import type { DeepReadonly, LayahPage } from "./types";
+
+/** Gestures only read the page; accepting the read-only view lets them take `EditorSession.getPage()` directly. */
+type PageView = DeepReadonly<LayahPage>;
 
 /**
  * Pointer-gesture seam between the page overlay (React) and the interaction state machine.
@@ -26,7 +29,7 @@ export const NOOP_MOVE_TOLERANCE_PX = 0.25;
 export const MARQUEE_MIN_PT = 4;
 
 /** Everything on a page that a click can hit. Blocks lose area ties so a one-line block selects as its (editable) run. */
-export function hitCandidates(page: LayahPage) {
+export function hitCandidates(page: PageView) {
   return [
     ...Object.values(page.layout.runs).map(r => ({ id: r.id, bounds: r.bounds })),
     ...Object.values(page.layout.textBlocks).map(b => ({
@@ -44,7 +47,7 @@ const gestureActive = (m: InteractionStateMachine, pageIndex: number) => {
   return s.activePage === pageIndex && s.phase !== "idle";
 };
 
-export function gestureDown(m: InteractionStateMachine, page: LayahPage, pt: PdfPoint, shift: boolean): void {
+export function gestureDown(m: InteractionStateMachine, page: PageView, pt: PdfPoint, shift: boolean): void {
   m.pointerDown(pt, hitTestPoint(pt, hitCandidates(page)), shift, page.pageIndex);
 }
 
@@ -56,7 +59,7 @@ export function gestureMove(m: InteractionStateMachine, pageIndex: number, pt: P
 }
 
 /** Normal release. Applies marquee selection; returns a move intent only for a real, non-trivial drag. */
-export function gestureUp(m: InteractionStateMachine, page: LayahPage, shift: boolean, zoom: number): EditorMutationIntent | null {
+export function gestureUp(m: InteractionStateMachine, page: PageView, shift: boolean, zoom: number): EditorMutationIntent | null {
   if (!gestureActive(m, page.pageIndex)) return null;
   const st = m.getState();
   const intent = m.pointerUp();
@@ -86,7 +89,7 @@ export function gestureCancel(m: InteractionStateMachine, pageIndex: number): vo
 }
 
 /** Ctrl/Cmd+A: every run and image on the page. Selection only. */
-export function selectAllOnPage(m: InteractionStateMachine, page: LayahPage): void {
+export function selectAllOnPage(m: InteractionStateMachine, page: PageView): void {
   m.select([
     ...Object.keys(page.layout.runs),
     ...Object.values(page.objects).filter(o => o.type === "image").map(o => o.id),

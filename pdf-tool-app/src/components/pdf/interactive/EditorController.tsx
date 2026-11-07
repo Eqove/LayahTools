@@ -22,6 +22,8 @@ const MAX_IMAGE_SIDE = 2000;
 
 const hexToRgb = (hex: string): [number, number, number] => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** Committed, read-only page of a session, or undefined when the index is not (or no longer) valid. */
+const pageOf = (s: EditorSession | null | undefined, i: number | null) => (s && i !== null && i >= 0 && i < s.pageCount ? s.getPage(i) : undefined);
 
 async function decodeImage(file: File): Promise<PendingImage> {
   const bmp = await createImageBitmap(file);
@@ -73,7 +75,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     (async () => {
       try {
         const wasm = await (await fetch("/pdfium.wasm")).arrayBuffer();
-        await s.open(new Uint8Array(await file.arrayBuffer()), wasm);
+        await s.open(new Uint8Array(await file.arrayBuffer()), wasm, { transfer: true }); // fresh array: no defensive copy needed
         if (!alive) { s.dispose(); return; }
         sessionRef.current?.dispose();
         sessionRef.current = s;
@@ -146,7 +148,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
         e.preventDefault();
         const st = machine.getState();
         if (st.activePage !== null && sessionRef.current) {
-          const page = sessionRef.current.store.getPage(st.activePage);
+          const page = pageOf(sessionRef.current, st.activePage);
           if (page) {
             selectAllOnPage(machine, page);
             sync();
@@ -190,7 +192,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
 
   // ---- toolbar actions ---------------------------------------------------------------------
   const selected = editorState.selectedObjectIds;
-  const selPage = activePage !== null ? session?.store.getPage(activePage) : undefined;
+  const selPage = pageOf(session, activePage);
   void rev;
   const singleRun = selected.length === 1 && selPage?.layout.runs[selected[0]] ? selected[0] : null;
   const singleObj = selected.length === 1 && selPage ? selPage.objects[selected[0]] : undefined;
@@ -251,7 +253,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     if (tool === "text") {
       setPlacement({ pageIndex, x, y });
     } else if (tool === "image" && pendingImage) {
-      const pg = session!.store.getPage(pageIndex)!;
+      const pg = session!.getPage(pageIndex);
       const w = Math.min(pg.width * 0.4, pendingImage.pw), h = w * (pendingImage.ph / pendingImage.pw);
       const left = Math.max(0, Math.min(x, pg.width - w)), top = Math.min(pg.height, Math.max(h, y));
       run("Inserting image…", s => s.addImage(pageIndex, { rgba: pendingImage.rgba, pixelWidth: pendingImage.pw, pixelHeight: pendingImage.ph, x: left, y: top - h, width: w, height: h }), pageIndex)
@@ -398,9 +400,9 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const ref = useRef<HTMLDivElement>(null);
   const size = useElementSize(ref);
   void rev;
-  const page = session.store.getPage(pageIndex);
-  const reason = session.uneditableReason(pageIndex);
+  const page = pageOf(session, pageIndex);
   if (!page) return null;
+  const reason = session.uneditableReason(pageIndex);
   if (reason) {
     return <div className="absolute top-2 left-2 z-50 rounded bg-amber-100 text-amber-900 text-xs px-2 py-1 pointer-events-none">{reason}</div>;
   }
