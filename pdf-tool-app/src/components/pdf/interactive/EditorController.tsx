@@ -3,7 +3,7 @@ import { PdfViewer } from "@/components/pdf/viewer/PdfViewer";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { EditorSession, FontCoverageError } from "@/lib/pdf/editor/session";
 import { InteractionStateMachine, LayahEditorState } from "@/lib/document/interaction";
-import { hitTestPoint } from "@/lib/document/hittest";
+import { gestureDown, gestureMove, gestureUp, gestureCancel, selectAllOnPage } from "@/lib/document/gestures";
 import { viewportToPdfPoint, pdfToViewportBounds, PageCoordinateContext } from "@/lib/document/coordinates";
 import { downloadBytes } from "@/lib/pdf/download";
 import type { LayahObjectBounds, LayahTextObject } from "@/lib/document/types";
@@ -148,11 +148,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
         if (st.activePage !== null && sessionRef.current) {
           const page = sessionRef.current.store.getPage(st.activePage);
           if (page) {
-            const allIds = [
-              ...Object.keys(page.layout.runs),
-              ...Object.values(page.objects).filter(o => o.type === "image").map(o => o.id),
-            ];
-            machine.select(allIds, st.activePage);
+            selectAllOnPage(machine, page);
             sync();
           }
         }
@@ -414,45 +410,30 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     const r = ref.current!.getBoundingClientRect();
     return viewportToPdfPoint({ x: e.clientX - r.left, y: e.clientY - r.top }, ctx);
   };
-  const candidates = () => [
-    ...Object.values(page.layout.runs).map(r => ({ id: r.id, bounds: r.bounds })),
-    // blocks lose area ties against the run they wrap, so a single-line block selects as its (editable) run
-    ...Object.values(page.layout.textBlocks).map(b => ({ id: b.id, bounds: b.bounds, area: (b.bounds.right - b.bounds.left) * (b.bounds.top - b.bounds.bottom) * 1.001 + 0.01 })),
-    ...Object.values(page.objects).filter(o => o.type === "image").map(o => ({ id: o.id, bounds: o.bounds })),
-  ];
   const mine = editorState.activePage === pageIndex;
 
+  // All gesture decisions live in lib/document/gestures.ts; this component only translates DOM events.
   const onPointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
     const pt = toPdf(e);
     if (tool !== "select") { onPlace(pageIndex, pt.x, pt.y); return; }
-    machine.pointerDown(pt, hitTestPoint(pt, candidates()), e.shiftKey, pageIndex);
+    gestureDown(machine, page, pt, e.shiftKey);
     sync();
     try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer: dragging still works without capture */ }
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!mine || editorState.phase === "idle") return;
-    machine.pointerMove(toPdf(e), 6 / ctx.zoom); // 6 screen px: a click with trackpad jitter must stay a click
-    sync();
+    if (gestureMove(machine, pageIndex, toPdf(e), ctx.zoom)) sync();
   };
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!mine || editorState.phase === "idle") return;
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
-    const st = machine.getState();
-    const intent = machine.pointerUp();
-    if (st.phase === "selecting" && st.dragStartPoint && st.currentPointer) {
-      const a = st.dragStartPoint, b = st.currentPointer;
-      if (Math.hypot(a.x - b.x, a.y - b.y) > 4) {
-        const box = { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), bottom: Math.min(a.y, b.y), top: Math.max(a.y, b.y) };
-        const hit = [
-          ...Object.values(page.layout.runs),
-          ...Object.values(page.objects).filter(o => o.type === "image"),
-        ].filter(o => o.bounds.left < box.right && o.bounds.right > box.left && o.bounds.bottom < box.top && o.bounds.top > box.bottom).map(o => o.id);
-        machine.select([...new Set([...(e.shiftKey ? st.selectedObjectIds : []), ...hit])], pageIndex);
-      }
-    }
+    const intent = gestureUp(machine, page, e.shiftKey, ctx.zoom);
     sync();
     if (intent?.type === "move") onMove(pageIndex, intent.objectIds, intent.deltaX, intent.deltaY);
+  };
+  // pointercancel and lostpointercapture abandon the gesture: they must never commit a move.
+  const onPointerAbort = () => {
+    gestureCancel(machine, pageIndex);
+    sync();
   };
 
   const dragPt = mine && editorState.phase === "dragging" && editorState.dragStartPoint && editorState.currentPointer
@@ -518,7 +499,8 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerAbort}
+      onLostPointerCapture={onPointerAbort}
     >
       <SelectionOverlay
         selectedObjectBounds={selectedBounds}

@@ -11,7 +11,7 @@
     "copy-wasm": "node -e \"require('fs').copyFileSync('node_modules/@embedpdf/pdfium/dist/pdfium.wasm','public/pdfium.wasm')\"",
     "predev": "npm run copy-wasm",
     "prebuild": "npm run copy-wasm",
-    "test": "tsx scripts/test-workspace-files.ts && tsx scripts/test-editor-session.ts"
+    "test": "tsx scripts/test-workspace-files.ts && tsx scripts/test-editor-session.ts && tsx scripts/test-no-mutation.ts"
   },
   "dependencies": {
     "@embedpdf/pdfium": "^2.15.0",

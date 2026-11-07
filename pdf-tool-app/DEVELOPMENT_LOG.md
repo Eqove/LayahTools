@@ -130,3 +130,52 @@ P1 (Workspace stability, checklist 2.1) is **not started**. P2 does not begin un
 - `LAYAH_ARCHITECTURE.md`, `DEVELOPMENT_LOG.md`: planning documents now stated as local-only and untracked; decisions
   D-06 to D-10 recorded.
 - The seven untracked planning files were not touched (checksums verified before and after).
+
+## B-1.1: non-editing interactions never mutate the PDF
+
+Three statuses, kept separate.
+
+| Status | State |
+|---|---|
+| **Implementation** | Done on `develop` (commit recorded below) |
+| **Automated test coverage** | 62 new checks, `npm test` 160/160 PASS; build passes |
+| **Human acceptance** | **Not done.** No physical mouse/trackpad test; real touch/pen cancel never exercised |
+
+**Seam.** New pure module `src/lib/document/gestures.ts` (no React/DOM/session). `EditorController`'s page overlay now only
+translates events into `gestureDown/Move/Up/Cancel` and `selectAllOnPage`; hit-testing candidates and the marquee code moved
+there unchanged. The seam reads the state machine (not React props) to decide whether a gesture is in flight.
+
+**Bug fixed: cancel committed the drag.** `onPointerCancel` was `onPointerUp`, so a cancelled drag emitted a move intent
+and mutated the document. Now `onPointerCancel` and a new `onLostPointerCapture` call `gestureCancel` (returns `void`, so it
+cannot yield an intent). Selection made by the press is kept; the machine returns to idle; the next gesture works (tested).
+`lostpointercapture` also fires after every normal release, where it is a no-op (tested).
+
+**No-op drags.** After crossing the threshold, a drag released within `NOOP_MOVE_TOLERANCE_PX = 0.25` CSS px of its start
+produces no intent. Chosen as the largest value below any pointer's granularity (device pixel = 0.33 CSS px at 3x DPR), so
+it cannot swallow a deliberate move; a 1 px net move still commits (tested). Threshold unchanged at 6 px.
+
+**Tests (`scripts/test-no-mutation.ts`, `scripts/lib/mutation-probe.ts`).** Counters: engine mutators (7), `export`, `load`,
+raw PDFium calls (GenerateContent, Transform, RemoveObject, InsertObject, SetText, SaveAsCopy, LoadMemDocument,
+CloseDocument), `generation`, history past/future, byte identity. All must be unchanged for: press/release, shift-click,
+empty click, hover, run/block/image selection, select-all, clear, marquee and sub-4pt marquee, sub-threshold jitter at
+50/100/150/200% (6 directions x 5 sub-pixel offsets, below 5.99/5.94 px), pointercancel, lostpointercapture (drag and
+marquee), Escape mid-drag, return-to-origin, zoom changes, page switch. Above threshold (6.01/6.02 px) at all zooms a move
+intent with the exact pixel travel is produced. Exactly 6.00 px is deliberately not asserted (float-dependent at 150%).
+**Positive controls (observed):** a drag-move of a 2-object run gives `moveObject` +2, `transformObject` +2,
+`export` +1, `load` +1, generation +1, history +1, bytes replaced; nudge identical; delete `deleteObject` +4 (one run's
+sources), export/load +1; undo `load` +1, `export` 0, history -1 / redo +1. **Controlled violations:** (a) the legacy
+"cancel commits" flow and (b) a mutation hidden in a selection are both reported by the probe. Mutating the production
+seam also fails the suite: threshold 6 -> 3 gives 16 FAIL; tolerance 0.25 -> 0 gives 1 FAIL (file restored byte-identical).
+
+**Browser check (scripted pointer events, dev server).** On `double coloumn sample.pdf`: pointercancel and
+lostpointercapture mid-drag removed the drag ghost and left Undo disabled (no history), the next click selected normally, a
+4 px jitter click made no history, and a real drag enabled Undo and kept 3 visible canvases. Scripted events only.
+
+**Remaining limitations / not verified.**
+- React event wiring (which event reaches which handler) has no automated test; only the scripted-event browser check above.
+- `PdfViewer` zoom/page-navigation state is checked structurally (no session/engine reference) and not executed.
+- Real mouse/trackpad, touch and pen behaviour (including true `pointercancel` sources) untested by a human.
+- Probe reads TypeScript-private fields (`engine`, `past`, `future`); it throws if they are renamed, but it is coupled to them.
+- Arrow-key nudge still makes one full mutation + snapshot per keypress (P2, untouched). Marquee threshold is still 4 PDF
+  points, not screen pixels (pre-existing). Escape clears selection via `machine.reset()` in the controller (not in the seam).
+- A-1.1 FILES reorder remains OPEN (untouched).

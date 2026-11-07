@@ -13,7 +13,7 @@ Stack: Next.js 16 App Router, React 19, TypeScript, Tailwind v3. Package manager
 ```bash
 npm run dev      # predev copies node_modules/@embedpdf/pdfium/dist/pdfium.wasm to public/pdfium.wasm
 npm run build    # also the type-check; prebuild does the same copy (file is tracked; no diff expected)
-npm test         # test-workspace-files.ts + test-editor-session.ts (98 checks at baseline 2fc5270)
+npm test         # test-workspace-files + test-editor-session + test-no-mutation (160 checks)
 npx tsx scripts/<name>.ts   # older model/interaction diagnostics, run individually
 ```
 `npm run lint` has a large legacy backlog; keep files you touch clean but don't mass-fix it.
@@ -21,6 +21,8 @@ npx tsx scripts/<name>.ts   # older model/interaction diagnostics, run individua
 ## Layout
 - `src/lib/pdf/editor/` engine (PDFium) and `EditorSession`; `src/lib/document/` engine-independent model.
 - `src/lib/pdf/operations.ts`, `heavy-operations.ts`, `intelligence-operations.ts` pdf-lib / PDF.js / Tesseract tools.
+- `src/lib/document/gestures.ts` pure pointer-gesture seam used by the overlay (cancel never commits; see B-1.1).
+- `scripts/lib/mutation-probe.ts` reusable test-only mutation counters.
 - `src/lib/workspace/files.ts` pure file-collection logic. `src/components/workspace/Workspace.tsx` workspace shell.
 - `src/components/pdf/` viewer (`PdfViewer`) and interactive overlays (`EditorController`, `SelectionOverlay`).
 - `scripts/` tests and diagnostics (plain `tsx` + assertions, real PDFs from `tests/fixtures/pdfs`). No test

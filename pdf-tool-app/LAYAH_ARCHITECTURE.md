@@ -40,10 +40,18 @@ EditorController (React: toolbar, overlays, keyboard)
   pointer cannot be reused; an id deleted earlier in the same transaction is dropped from the map. If anything
   throws, the last good bytes are reloaded and the error is surfaced (document is never left half-edited).
 - **Undo/redo** = stack of exported byte snapshots (max 20). Undo reloads a snapshot; it cannot drift from the file.
-- **Selection** lives in `InteractionStateMachine` (selection never spans pages). A press only becomes a drag
-  after the pointer moves **6 screen pixels** (`EditorController` passes `6 / zoom` PDF points to `pointerMove`), so
-  trackpad jitter stays a click and never creates a mutation. The state machine's own default is 3 PDF points; that
-  default is only used by headless tests and callers that pass no threshold.
+- **Selection** lives in `InteractionStateMachine` (selection never spans pages). All pointer-gesture decisions live in
+  the pure seam `lib/document/gestures.ts` (`gestureDown/Move/Up/Cancel`, `selectAllOnPage`, `hitCandidates`); the page
+  overlay in `EditorController` only translates DOM events into those calls. A press becomes a drag only after
+  **6 screen pixels** (`DRAG_THRESHOLD_PX`, passed to the machine as `6 / zoom` PDF points), so trackpad jitter stays a
+  click. The machine's own default is 3 PDF points, used only by callers that pass no threshold.
+  - `pointercancel` and `lostpointercapture` call `gestureCancel`: the pending gesture is discarded and no intent is
+    produced (before B-1.1, cancel was wired to pointer-up and committed the drag).
+  - A completed drag whose net displacement is <= `NOOP_MOVE_TOLERANCE_PX` (0.25 CSS px) yields no intent. That is below
+    the finest pointer granularity (one device pixel is 0.33 CSS px at 3x DPR), so it absorbs float noise and returning
+    to the origin without swallowing any deliberate move (a 1 px net move still commits).
+  - Marquee boxes smaller than 4 PDF points (`MARQUEE_MIN_PT`, unchanged) select nothing; this is in points, not
+    screen pixels, so it is 2 px at 50% zoom and 8 px at 200%.
   After a mutation, selection is re-derived from source ids (`layoutIdsFor`).
 - **Parent sync.** After each edit the controller emits a new `File` to `Workspace` (so other tools and the file list
   see the edited PDF) and tags it so the file effect doesn't re-initialise the session.
@@ -161,6 +169,13 @@ below and the repository-root `CLAUDE.md` are the version available to anyone wh
   those files and cannot be looked up by a cloner. The tracked running log is `DEVELOPMENT_LOG.md`.
 
 ## Testing
+- **B-1.1 invariant, `npm test` -> `scripts/test-no-mutation.ts` (62 checks):** non-editing interactions never mutate the
+  PDF. It drives the real `gestures.ts` seam with a real state machine and `EditorSession` on real PDFs and applies every
+  returned move intent like the controller does. `scripts/lib/mutation-probe.ts` (test-only, reusable) counts engine
+  mutations, exports, reloads, raw PDFium calls, `generation`, history depth and byte identity without any production
+  change. Positive controls (drag-move, nudge, delete, undo) prove the counters move; two controlled violations prove a
+  leak is caught. Not covered: the React event wiring itself and `PdfViewer` zoom/page-navigation state (the latter is
+  only checked structurally: the viewer source does not reference the session/engine).
 - `npm test` runs `scripts/test-workspace-files.ts` (15 checks on the file collection; `reorderFiles` is not covered)
   then `scripts/test-editor-session.ts` (83 checks): real PDFs (`tests/fixtures/pdfs`), move/group/replace/delete/add text/
   image/rect/resize/undo/redo, **independent reload** in a fresh engine and pdf-lib, rollback on bad ids, malformed PDF.
