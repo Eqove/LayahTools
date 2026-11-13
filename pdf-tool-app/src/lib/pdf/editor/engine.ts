@@ -9,12 +9,14 @@ import type {
   PdfImageOptions,
   PdfRectOptions
 } from "./types";
+import type { EditorEngine } from "./engine-contract";
+import { EngineError } from "./errors";
 
 /**
  * A high-level abstraction over the PDFium WASM engine for deep visual PDF edits.
  * Designed to cleanly encapsulate all raw pointer, malloc/free, and C-struct logic.
  */
-export class PdfEditorEngine {
+export class PdfEditorEngine implements EditorEngine {
   private pdfium: any = null;
   private wasm: any = null;
   
@@ -69,11 +71,9 @@ export class PdfEditorEngine {
       const code = this.pdfium.FPDF_GetLastError?.();
       this.cleanupDocument();
       // FPDF_ERR_PASSWORD = 4
-      throw new Error(
-        code === 4
-          ? "This PDF is password-protected. Unlock it before editing."
-          : "This PDF could not be opened for editing (it may be damaged or unsupported)."
-      );
+      throw code === 4
+        ? new EngineError("password", "This PDF is password-protected. Unlock it before editing.")
+        : new EngineError("format", "This PDF could not be opened for editing (it may be damaged or unsupported).");
     }
   }
 

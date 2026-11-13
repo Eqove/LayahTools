@@ -3,7 +3,7 @@ import { PdfViewer } from "@/components/pdf/viewer/PdfViewer";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { EditorSession, FontCoverageError } from "@/lib/pdf/editor/session";
 import { InteractionStateMachine, LayahEditorState } from "@/lib/document/interaction";
-import { hitTestPoint } from "@/lib/document/hittest";
+import { gestureDown, gestureMove, gestureUp, gestureCancel, selectAllOnPage } from "@/lib/document/gestures";
 import { viewportToPdfPoint, pdfToViewportBounds, PageCoordinateContext } from "@/lib/document/coordinates";
 import { downloadBytes } from "@/lib/pdf/download";
 import type { LayahObjectBounds, LayahTextObject } from "@/lib/document/types";
@@ -22,6 +22,8 @@ const MAX_IMAGE_SIDE = 2000;
 
 const hexToRgb = (hex: string): [number, number, number] => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** Committed, read-only page of a session, or undefined when the index is not (or no longer) valid. */
+const pageOf = (s: EditorSession | null | undefined, i: number | null) => (s && i !== null && i >= 0 && i < s.pageCount ? s.getPage(i) : undefined);
 
 async function decodeImage(file: File): Promise<PendingImage> {
   const bmp = await createImageBitmap(file);
@@ -73,7 +75,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     (async () => {
       try {
         const wasm = await (await fetch("/pdfium.wasm")).arrayBuffer();
-        await s.open(new Uint8Array(await file.arrayBuffer()), wasm);
+        await s.open(new Uint8Array(await file.arrayBuffer()), wasm, { transfer: true }); // fresh array: no defensive copy needed
         if (!alive) { s.dispose(); return; }
         sessionRef.current?.dispose();
         sessionRef.current = s;
@@ -146,13 +148,9 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
         e.preventDefault();
         const st = machine.getState();
         if (st.activePage !== null && sessionRef.current) {
-          const page = sessionRef.current.store.getPage(st.activePage);
+          const page = pageOf(sessionRef.current, st.activePage);
           if (page) {
-            const allIds = [
-              ...Object.keys(page.layout.runs),
-              ...Object.values(page.objects).filter(o => o.type === "image").map(o => o.id),
-            ];
-            machine.select(allIds, st.activePage);
+            selectAllOnPage(machine, page);
             sync();
           }
         }
@@ -194,7 +192,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
 
   // ---- toolbar actions ---------------------------------------------------------------------
   const selected = editorState.selectedObjectIds;
-  const selPage = activePage !== null ? session?.store.getPage(activePage) : undefined;
+  const selPage = pageOf(session, activePage);
   void rev;
   const singleRun = selected.length === 1 && selPage?.layout.runs[selected[0]] ? selected[0] : null;
   const singleObj = selected.length === 1 && selPage ? selPage.objects[selected[0]] : undefined;
@@ -255,7 +253,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     if (tool === "text") {
       setPlacement({ pageIndex, x, y });
     } else if (tool === "image" && pendingImage) {
-      const pg = session!.store.getPage(pageIndex)!;
+      const pg = session!.getPage(pageIndex);
       const w = Math.min(pg.width * 0.4, pendingImage.pw), h = w * (pendingImage.ph / pendingImage.pw);
       const left = Math.max(0, Math.min(x, pg.width - w)), top = Math.min(pg.height, Math.max(h, y));
       run("Inserting image…", s => s.addImage(pageIndex, { rgba: pendingImage.rgba, pixelWidth: pendingImage.pw, pixelHeight: pendingImage.ph, x: left, y: top - h, width: w, height: h }), pageIndex)
@@ -402,9 +400,9 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const ref = useRef<HTMLDivElement>(null);
   const size = useElementSize(ref);
   void rev;
-  const page = session.store.getPage(pageIndex);
-  const reason = session.uneditableReason(pageIndex);
+  const page = pageOf(session, pageIndex);
   if (!page) return null;
+  const reason = session.uneditableReason(pageIndex);
   if (reason) {
     return <div className="absolute top-2 left-2 z-50 rounded bg-amber-100 text-amber-900 text-xs px-2 py-1 pointer-events-none">{reason}</div>;
   }
@@ -414,45 +412,30 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     const r = ref.current!.getBoundingClientRect();
     return viewportToPdfPoint({ x: e.clientX - r.left, y: e.clientY - r.top }, ctx);
   };
-  const candidates = () => [
-    ...Object.values(page.layout.runs).map(r => ({ id: r.id, bounds: r.bounds })),
-    // blocks lose area ties against the run they wrap, so a single-line block selects as its (editable) run
-    ...Object.values(page.layout.textBlocks).map(b => ({ id: b.id, bounds: b.bounds, area: (b.bounds.right - b.bounds.left) * (b.bounds.top - b.bounds.bottom) * 1.001 + 0.01 })),
-    ...Object.values(page.objects).filter(o => o.type === "image").map(o => ({ id: o.id, bounds: o.bounds })),
-  ];
   const mine = editorState.activePage === pageIndex;
 
+  // All gesture decisions live in lib/document/gestures.ts; this component only translates DOM events.
   const onPointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
     const pt = toPdf(e);
     if (tool !== "select") { onPlace(pageIndex, pt.x, pt.y); return; }
-    machine.pointerDown(pt, hitTestPoint(pt, candidates()), e.shiftKey, pageIndex);
+    gestureDown(machine, page, pt, e.shiftKey);
     sync();
     try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer: dragging still works without capture */ }
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!mine || editorState.phase === "idle") return;
-    machine.pointerMove(toPdf(e), 6 / ctx.zoom); // 6 screen px: a click with trackpad jitter must stay a click
-    sync();
+    if (gestureMove(machine, pageIndex, toPdf(e), ctx.zoom)) sync();
   };
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!mine || editorState.phase === "idle") return;
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
-    const st = machine.getState();
-    const intent = machine.pointerUp();
-    if (st.phase === "selecting" && st.dragStartPoint && st.currentPointer) {
-      const a = st.dragStartPoint, b = st.currentPointer;
-      if (Math.hypot(a.x - b.x, a.y - b.y) > 4) {
-        const box = { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), bottom: Math.min(a.y, b.y), top: Math.max(a.y, b.y) };
-        const hit = [
-          ...Object.values(page.layout.runs),
-          ...Object.values(page.objects).filter(o => o.type === "image"),
-        ].filter(o => o.bounds.left < box.right && o.bounds.right > box.left && o.bounds.bottom < box.top && o.bounds.top > box.bottom).map(o => o.id);
-        machine.select([...new Set([...(e.shiftKey ? st.selectedObjectIds : []), ...hit])], pageIndex);
-      }
-    }
+    const intent = gestureUp(machine, page, e.shiftKey, ctx.zoom);
     sync();
     if (intent?.type === "move") onMove(pageIndex, intent.objectIds, intent.deltaX, intent.deltaY);
+  };
+  // pointercancel and lostpointercapture abandon the gesture: they must never commit a move.
+  const onPointerAbort = () => {
+    gestureCancel(machine, pageIndex);
+    sync();
   };
 
   const dragPt = mine && editorState.phase === "dragging" && editorState.dragStartPoint && editorState.currentPointer
@@ -518,7 +501,8 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerAbort}
+      onLostPointerCapture={onPointerAbort}
     >
       <SelectionOverlay
         selectedObjectBounds={selectedBounds}
