@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "tolerance": {
+    "textBounds": 2,
+    "vector": 0.5,
+    "formRect": 0.5
+  },
+  "fixture": "form-acroform.pdf",
+  "sha256": "4dbdf651baeedd40183e0e248386e16c23e9e13df3e71fd86d9a099c84896463",
+  "pageCount": 1,
+  "pages": [
+    {
+      "pageIndex": 0,
+      "width": 595,
+      "height": 842,
+      "textRegions": [
+        {
+          "id": "p0-title",
+          "role": "title",
+          "zone": "full",
+          "bounds": {
+            "left": 51.64,
+            "bottom": 776.29,
+            "right": 271.92,
+            "top": 792.92
+          },
+          "textStart": "Interactive Application Form",
+          "textEnd": "Interactive Application Form"
+        },
+        {
+          "id": "p0-label-full-name",
+          "role": "label",
+          "zone": "left",
+          "bounds": {
+            "left": 51.03,
+            "bottom": 719.83,
+            "right": 106.96,
+            "top": 728.62
+          },
+          "textStart": "Full Name:",
+          "textEnd": "Full Name:"
+        },
+        {
+          "id": "p0-label-email",
+          "role": "label",
+          "zone": "left",
+          "bounds": {
+            "left": 51.03,
+            "bottom": 659.83,
+            "right": 129.64,
+            "top": 668.62
+          },
+          "textStart": "Email Address:",
+          "textEnd": "Email Address:"
+        }
+      ],
+      "readingOrder": [
+        "p0-title",
+        "p0-label-full-name",
+        "applicant.name",
+        "p0-label-email",
+        "applicant.email"
+      ],
+      "formFields": [
+        {
+          "name": "applicant.name",
+          "type": "text",
+          "bounds": {
+            "left": 149.5,
+            "bottom": 709.5,
+            "right": 400.5,
+            "top": 734.5
+          },
+          "value": "John Doe",
+          "labelRegionId": "p0-label-full-name"
+        },
+        {
+          "name": "applicant.email",
+          "type": "text",
+          "bounds": {
+            "left": 149.5,
+            "bottom": 649.5,
+            "right": 400.5,
+            "top": 674.5
+          },
+          "value": "john@example.com",
+          "labelRegionId": "p0-label-email"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "structure": "Field names, types and values read from the AcroForm dictionary with pdf-lib and cross-checked against the generator source (scripts/generate-corpus.ts, PDF-07).",
+    "geometry": "Field bounds are the widget /Rect stored in the PDF. They are 0.5pt larger on every side than the generator's requested rectangle (150,710,250x24) because pdf-lib adds half the border width.",
+    "text": "Title and the two labels are PDFium text objects; field values are NOT page text objects (they are widget annotations)."
+  },
+  "repeatedElements": [],
+  "uncertain": [
+    {
+      "id": "label-field-association",
+      "what": "Which label belongs to which field.",
+      "why": "The PDF has no tagging linking them. The pairing is by position only: each label sits immediately left of its field on the same line (label baselines y=720 and y=660, field rects spanning y=709.5-734.5 and y=649.5-674.5)."
+    }
+  ],
+  "limitations": [
+    "Field values live in widget annotations, so PDFium page text objects (what the editor engine reads) do not include 'John Doe' or 'john@example.com'.",
+    "Forms are an unsupported editing surface in LayahTools today (see root CLAUDE.md): the editor model does not represent AcroForm widgets, so nothing in the Layah model corresponds to these fields.",
+    "Only text fields are present; checkboxes, radio groups, dropdowns and signatures are not covered by this fixture.",
+    "Single page: header/footer and page-number detection cannot apply."
+  ]
+}

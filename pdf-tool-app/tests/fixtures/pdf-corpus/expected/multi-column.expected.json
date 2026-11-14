@@ -1,0 +1,808 @@
+{
+  "schemaVersion": 1,
+  "tolerance": {
+    "textBounds": 2,
+    "vector": 0.5,
+    "formRect": 0.5
+  },
+  "fixture": "multi-column.pdf",
+  "sha256": "0cb8ec3fd9c9cf4909a44ed649b5d9522bbcad9419a142fea9b03035a9d963b0",
+  "pageCount": 3,
+  "pages": [
+    {
+      "pageIndex": 0,
+      "width": 612,
+      "height": 792,
+      "textRegions": [
+        {
+          "id": "p0-title",
+          "role": "title",
+          "zone": "full",
+          "bounds": {
+            "left": 227.94,
+            "bottom": 667.54,
+            "right": 384.11,
+            "top": 680.86
+          },
+          "textStart": "USENIX Example Paper",
+          "textEnd": "USENIX Example Paper"
+        },
+        {
+          "id": "p0-author-1",
+          "role": "author",
+          "zone": "full",
+          "bounds": {
+            "left": 218.22,
+            "bottom": 627.35,
+            "right": 286.99,
+            "top": 648.96
+          },
+          "textStart": "Pekka Nikander Aalto University",
+          "textEnd": "ka Nikander Aalto University"
+        },
+        {
+          "id": "p0-author-2",
+          "role": "author",
+          "zone": "full",
+          "bounds": {
+            "left": 307.64,
+            "bottom": 629.33,
+            "right": 392.69,
+            "top": 648.96
+          },
+          "textStart": "Jane-Ellen Long USENIX Associati",
+          "textEnd": "llen Long USENIX Association"
+        },
+        {
+          "id": "p0-abstract-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 160.34,
+            "bottom": 595.35,
+            "right": 208.53,
+            "top": 604.51
+          },
+          "textStart": "Abstract",
+          "textEnd": "Abstract"
+        },
+        {
+          "id": "p0-abstract-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.15,
+            "bottom": 445.33,
+            "right": 296.88,
+            "top": 586.96
+          },
+          "textStart": "This is an example for a USENIX ",
+          "textEnd": "n abstract is 200-300 words."
+        },
+        {
+          "id": "p0-intro-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 73.21,
+            "bottom": 421.35,
+            "right": 155.1,
+            "top": 430.51
+          },
+          "textStart": "1 Introduction",
+          "textEnd": "1 Introduction"
+        },
+        {
+          "id": "p0-intro-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.15,
+            "bottom": 249.32,
+            "right": 297.12,
+            "top": 412.95
+          },
+          "textStart": "For the purposes of USENIX confe",
+          "textEnd": " 4 contains our conclusions."
+        },
+        {
+          "id": "p0-related-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 72.52,
+            "bottom": 223.35,
+            "right": 159.64,
+            "top": 232.51
+          },
+          "textStart": "2 Related Work",
+          "textEnd": "2 Related Work"
+        },
+        {
+          "id": "p0-related-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.1,
+            "bottom": 133.29,
+            "right": 297.12,
+            "top": 214.96
+          },
+          "textStart": "Preparing good-looking publicati",
+          "textEnd": " re sponsible for the style."
+        },
+        {
+          "id": "p0-sec21-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 72.52,
+            "bottom": 107.09,
+            "right": 246.9,
+            "top": 118.51
+          },
+          "textStart": "2.1 Word and LaTeX templates",
+          "textEnd": "2.1 Word and LaTeX templates"
+        },
+        {
+          "id": "p0-sec21-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.19,
+            "bottom": 79.29,
+            "right": 297.56,
+            "top": 100.95
+          },
+          "textStart": "The USENIX website includes a te",
+          "textEnd": " as LaTeX templates. Many of"
+        },
+        {
+          "id": "p0-figure-1-caption",
+          "role": "caption",
+          "zone": "right",
+          "bounds": {
+            "left": 315.18,
+            "bottom": 334.77,
+            "right": 539.35,
+            "top": 364.93
+          },
+          "textStart": "Figure 1: This figure is showed ",
+          "textEnd": "uired to use this tem plate."
+        },
+        {
+          "id": "p0-sec21-continued",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315.14,
+            "bottom": 292.8,
+            "right": 539.53,
+            "top": 314.31
+          },
+          "textStart": "the settings in the CSS style sh",
+          "textEnd": "ed from the LaTeX templates.",
+          "continuesFrom": "p0-sec21-body"
+        },
+        {
+          "id": "p0-sec22-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315.52,
+            "bottom": 266.27,
+            "right": 415.46,
+            "top": 277.86
+          },
+          "textStart": "2.2 Style manuals",
+          "textEnd": "2.2 Style manuals"
+        },
+        {
+          "id": "p0-sec22-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315,
+            "bottom": 166.5,
+            "right": 539.93,
+            "top": 260.31
+          },
+          "textStart": "Besides typography, style is the",
+          "textEnd": "Zobel [2] seems appropriate."
+        },
+        {
+          "id": "p0-sec3-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315.66,
+            "bottom": 140.45,
+            "right": 418.52,
+            "top": 151.86
+          },
+          "textStart": "3 Implementation",
+          "textEnd": "3 Implementation"
+        },
+        {
+          "id": "p0-sec3-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315.15,
+            "bottom": 76.65,
+            "right": 539.83,
+            "top": 134.31
+          },
+          "textStart": "In this section we cover the fea",
+          "textEnd": " this in mind, this template"
+        }
+      ],
+      "figures": [
+        {
+          "id": "p0-figure-1",
+          "zone": "right",
+          "bounds": {
+            "left": 328.24,
+            "bottom": 395.44,
+            "right": 513.53,
+            "top": 593.96
+          },
+          "pathWindow": {
+            "left": 320,
+            "bottom": 390,
+            "right": 520,
+            "top": 600
+          },
+          "containsText": false
+        }
+      ],
+      "readingOrder": [
+        "p0-title",
+        "p0-author-1",
+        "p0-author-2",
+        "p0-abstract-heading",
+        "p0-abstract-body",
+        "p0-intro-heading",
+        "p0-intro-body",
+        "p0-related-heading",
+        "p0-related-body",
+        "p0-sec21-heading",
+        "p0-sec21-body",
+        "p0-figure-1",
+        "p0-figure-1-caption",
+        "p0-sec21-continued",
+        "p0-sec22-heading",
+        "p0-sec22-body",
+        "p0-sec3-heading",
+        "p0-sec3-body"
+      ]
+    },
+    {
+      "pageIndex": 1,
+      "width": 612,
+      "height": 792,
+      "textRegions": [
+        {
+          "id": "p1-figure-2-caption",
+          "role": "caption",
+          "zone": "full",
+          "bounds": {
+            "left": 72.18,
+            "bottom": 529.96,
+            "right": 368.36,
+            "top": 538.63
+          },
+          "textStart": "Figure 2: This figure floats to ",
+          "textEnd": "page, spanning both columns."
+        },
+        {
+          "id": "p1-left-lead",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 71.91,
+            "bottom": 441.98,
+            "right": 296.59,
+            "top": 509.61
+          },
+          "textStart": "includes a number of features. O",
+          "textEnd": " to help for mat references.",
+          "continuesFrom": "p0-sec3-body"
+        },
+        {
+          "id": "p1-sec31-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 72.66,
+            "bottom": 416,
+            "right": 133.72,
+            "top": 425.19
+          },
+          "textStart": "3.1 HTML5",
+          "textEnd": "3.1 HTML5"
+        },
+        {
+          "id": "p1-sec31-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.15,
+            "bottom": 278.46,
+            "right": 297.56,
+            "top": 407.64
+          },
+          "textStart": "This template uses HTML5 element",
+          "textEnd": "affili ation of the authors."
+        },
+        {
+          "id": "p1-sec32-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 72.66,
+            "bottom": 252.49,
+            "right": 113.1,
+            "top": 261.16
+          },
+          "textStart": "3.2 CSS",
+          "textEnd": "3.2 CSS"
+        },
+        {
+          "id": "p1-sec32-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72,
+            "bottom": 174.46,
+            "right": 297.56,
+            "top": 244.09
+          },
+          "textStart": "A CSS style sheet describes how ",
+          "textEnd": "of USENIX papers, including:"
+        },
+        {
+          "id": "p1-list-features",
+          "role": "list",
+          "zone": "left",
+          "bounds": {
+            "left": 75.32,
+            "bottom": 120.46,
+            "right": 189.42,
+            "top": 164.09
+          },
+          "textStart": "• multi-column layout • footnote",
+          "textEnd": "loats • multi-level counters"
+        },
+        {
+          "id": "p1-features-absent",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.15,
+            "bottom": 74.43,
+            "right": 296.82,
+            "top": 108.09
+          },
+          "textStart": "Some commonly used features are ",
+          "textEnd": "fed by USENIX authors, these"
+        },
+        {
+          "id": "p1-right-lead",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315.39,
+            "bottom": 499.95,
+            "right": 532.12,
+            "top": 509.61
+          },
+          "textStart": "are added by those who compile t",
+          "textEnd": "who compile the Proceedings.",
+          "continuesFrom": "p1-features-absent"
+        },
+        {
+          "id": "p1-sec33-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315.66,
+            "bottom": 473.75,
+            "right": 393.12,
+            "top": 485
+          },
+          "textStart": "3.3 JavaScript",
+          "textEnd": "3.3 JavaScript"
+        },
+        {
+          "id": "p1-sec33-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315.15,
+            "bottom": 411.98,
+            "right": 539.77,
+            "top": 467.61
+          },
+          "textStart": "This template uses JavaScript to",
+          "textEnd": "ing behind a numeric marker."
+        },
+        {
+          "id": "p1-sec34-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315.66,
+            "bottom": 386,
+            "right": 358.38,
+            "top": 394.68
+          },
+          "textStart": "3.4 PDF",
+          "textEnd": "3.4 PDF"
+        },
+        {
+          "id": "p1-sec34-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315.01,
+            "bottom": 200.1,
+            "right": 540.56,
+            "top": 377.89
+          },
+          "textStart": "(This section has been added by ",
+          "textEnd": "ne option must be specified:"
+        },
+        {
+          "id": "p1-code",
+          "role": "code",
+          "zone": "right",
+          "bounds": {
+            "left": 318.93,
+            "bottom": 180.32,
+            "right": 521.71,
+            "top": 190.04
+          },
+          "textStart": "$ prince --javascript example.ht",
+          "textEnd": "ce --javascript example.html"
+        },
+        {
+          "id": "p1-sec4-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315,
+            "bottom": 153,
+            "right": 361.9,
+            "top": 162.16
+          },
+          "textStart": "4 Tables",
+          "textEnd": "4 Tables"
+        },
+        {
+          "id": "p1-sec4-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 315.15,
+            "bottom": 100.98,
+            "right": 540.1,
+            "top": 144.61
+          },
+          "textStart": "The table below lists recipients",
+          "textEnd": "ved to the end of the table."
+        },
+        {
+          "id": "p1-footnote-a",
+          "role": "footnote",
+          "zone": "right",
+          "bounds": {
+            "left": 314.68,
+            "bottom": 73.94,
+            "right": 408.31,
+            "top": 82.77
+          },
+          "textStart": "[a] www.princexml.com",
+          "textEnd": "[a] www.princexml.com"
+        }
+      ],
+      "figures": [
+        {
+          "id": "p1-figure-2",
+          "zone": "full",
+          "bounds": {
+            "left": 78.47,
+            "bottom": 546.71,
+            "right": 533.55,
+            "top": 717.4
+          },
+          "pathWindow": {
+            "left": 75,
+            "bottom": 540,
+            "right": 540,
+            "top": 720
+          },
+          "containsText": true
+        }
+      ],
+      "readingOrder": [
+        "p1-figure-2",
+        "p1-figure-2-caption",
+        "p1-left-lead",
+        "p1-sec31-heading",
+        "p1-sec31-body",
+        "p1-sec32-heading",
+        "p1-sec32-body",
+        "p1-list-features",
+        "p1-features-absent",
+        "p1-right-lead",
+        "p1-sec33-heading",
+        "p1-sec33-body",
+        "p1-sec34-heading",
+        "p1-sec34-body",
+        "p1-code",
+        "p1-sec4-heading",
+        "p1-sec4-body",
+        "p1-footnote-a"
+      ],
+      "lists": [
+        {
+          "id": "p1-list-features",
+          "type": "bullet",
+          "items": [
+            "multi-column layout",
+            "footnotes",
+            "page and column floats",
+            "multi-level counters"
+          ]
+        }
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "width": 612,
+      "height": 792,
+      "textRegions": [
+        {
+          "id": "p2-sec5-heading",
+          "role": "heading",
+          "zone": "left",
+          "bounds": {
+            "left": 72.48,
+            "bottom": 534.52,
+            "right": 151.03,
+            "top": 543.72
+          },
+          "textStart": "5 Conclusions",
+          "textEnd": "5 Conclusions"
+        },
+        {
+          "id": "p2-sec5-body",
+          "role": "paragraph",
+          "zone": "left",
+          "bounds": {
+            "left": 72.29,
+            "bottom": 504.5,
+            "right": 296.88,
+            "top": 526.13
+          },
+          "textStart": "Each good paper concludes the mo",
+          "textEnd": "ificant findings in the end."
+        },
+        {
+          "id": "p2-ack-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315,
+            "bottom": 705.75,
+            "right": 419.74,
+            "top": 717.31
+          },
+          "textStart": "Acknowledgments",
+          "textEnd": "Acknowledgments"
+        },
+        {
+          "id": "p2-ack-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 314.91,
+            "bottom": 668.13,
+            "right": 539.53,
+            "top": 699.76
+          },
+          "textStart": "A polite author always includes ",
+          "textEnd": "y those who funded the work."
+        },
+        {
+          "id": "p2-avail-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315,
+            "bottom": 639.71,
+            "right": 380.88,
+            "top": 651.31
+          },
+          "textStart": "Availability",
+          "textEnd": "Availability"
+        },
+        {
+          "id": "p2-avail-body",
+          "role": "paragraph",
+          "zone": "right",
+          "bounds": {
+            "left": 314.9,
+            "bottom": 578.13,
+            "right": 539.93,
+            "top": 633.76
+          },
+          "textStart": "Please include a section at the ",
+          "textEnd": "rms and contact information."
+        },
+        {
+          "id": "p2-refs-heading",
+          "role": "heading",
+          "zone": "right",
+          "bounds": {
+            "left": 315.24,
+            "bottom": 552.15,
+            "right": 376.73,
+            "top": 561.31
+          },
+          "textStart": "References",
+          "textEnd": "References"
+        },
+        {
+          "id": "p2-refs-list",
+          "role": "reference-list",
+          "zone": "right",
+          "bounds": {
+            "left": 315.83,
+            "bottom": 476.13,
+            "right": 539.71,
+            "top": 543.76
+          },
+          "textStart": "[1] STRUNK, W. JR. , ANDWHITE , ",
+          "textEnd": "cember 1997, ISBN 9813083220"
+        }
+      ],
+      "tables": [
+        {
+          "id": "p2-table-1",
+          "zone": "left",
+          "bounds": {
+            "left": 72,
+            "bottom": 558.38,
+            "right": 297,
+            "top": 720
+          },
+          "rows": 9,
+          "columns": 2,
+          "rowEdgesY": [
+            719.72,
+            703.16,
+            686.59,
+            670.03,
+            653.47,
+            636.91,
+            620.34,
+            603.78,
+            587.22,
+            558.66
+          ],
+          "colEdgesX": [
+            72.28,
+            110.68,
+            296.72
+          ],
+          "merged": [
+            {
+              "row": 8,
+              "colStart": 0,
+              "colEnd": 1
+            }
+          ],
+          "cells": [
+            [
+              "Year",
+              "Recipient"
+            ],
+            [
+              "1999",
+              "X Window System*"
+            ],
+            [
+              "1998",
+              "Tim Berners-Lee"
+            ],
+            [
+              "1997",
+              "Brian W. Kernighan"
+            ],
+            [
+              "1996",
+              "The Software Tools Project"
+            ],
+            [
+              "1995",
+              "The Creation of USENET **"
+            ],
+            [
+              "1994",
+              "Networking Technologies"
+            ],
+            [
+              "1993",
+              "Berkeley UNIX"
+            ],
+            [
+              "* Given to the Community at Large ** Given to Jim Ellis and Tom Truscott",
+              ""
+            ]
+          ]
+        }
+      ],
+      "readingOrder": [
+        "p2-table-1",
+        "p2-sec5-heading",
+        "p2-sec5-body",
+        "p2-ack-heading",
+        "p2-ack-body",
+        "p2-avail-heading",
+        "p2-avail-body",
+        "p2-refs-heading",
+        "p2-refs-list"
+      ]
+    }
+  ],
+  "provenance": {
+    "structure": "Region windows, roles and reading order were labelled by hand from 1.5x PDFium renders of all three pages. Reading order follows the visual flow: full-width items, then the left column top to bottom, then the right column top to bottom.",
+    "geometry": "Region and figure bounds are measured (glyph-tight PDFium text bounds; union of vector paths). The table grid is measured from the vector ruling lines.",
+    "text": "textStart/textEnd are PDFium's extraction (whitespace-normalised). Table cell text is binned into the measured grid and was checked against the render."
+  },
+  "repeatedElements": [],
+  "uncertain": [
+    {
+      "id": "block-granularity",
+      "what": "Paragraph granularity.",
+      "why": "Blocks are visual blocks separated by vertical whitespace. Consecutive paragraphs set with only a first-line indent (no extra spacing) are one region: p0-abstract-body, p1-left-lead, p1-sec31-body and p1-sec34-body each hold two paragraphs."
+    },
+    {
+      "id": "figure-before-caption",
+      "what": "Figure precedes its caption in reading order.",
+      "why": "Convention only. The PDF is untagged, so there is no structure tree to confirm it; the figure sits above its caption on both pages."
+    },
+    {
+      "id": "continuations",
+      "what": "p0-sec21-continued continues p0-sec21-body across the column break, p1-left-lead continues p0-sec3-body across the page break, and p1-right-lead continues p1-features-absent.",
+      "why": "Judged by reading the text: each starts mid-sentence. The PDF encodes no link between them."
+    },
+    {
+      "id": "footnote-position",
+      "what": "p1-footnote-a is placed last (end of the right column).",
+      "why": "It is a page footnote under a rule at the bottom of the right column; a reader could also meet it directly after the '4 Tables' text."
+    },
+    {
+      "id": "authors-order",
+      "what": "p0-author-1 before p0-author-2.",
+      "why": "They are side-by-side centred blocks; left-to-right is the natural order but the PDF does not state it."
+    },
+    {
+      "id": "table-position-in-flow",
+      "what": "p2-table-1 is first on page 3, before '5 Conclusions'.",
+      "why": "It is the table announced by '4 Tables' at the end of page 2; the split across the page break is inferred from the text."
+    }
+  ],
+  "limitations": [
+    "Text is heavily fragmented in PDFium: 228/381/121 text objects for pages 1-3, words split mid-word (e.g. '2 R' + 'elated Work', 'contemporar' + 'y ones'), and a '.' can be its own object. Anything working on raw objects must merge them (see groupIntoLines).",
+    "Soft hyphens at line ends are extracted as U+0002 ('self-ref\\u0002'); joining hyphenated words across lines is not solved. Small-caps and spacing artefacts appear ('ANDWHITE', '1930’ s').",
+    "The column gutter is only ~18pt (left column ends x=297, right starts x=315). Line grouping must use a horizontal gap below that (default max(14, 1.5 x height)); a larger gap merges justified lines across the columns.",
+    "Page 2's keyboard figure is ~1049 vector paths plus ~117 single-glyph text objects (keycap labels). Those labels are part of the figure, not text regions.",
+    "The page-3 table has a footnote row spanning both columns, so row/column counts depend on interpretation: 9 ruled rows x 2 columns with one merged cell (8 rows are header + 7 data rows).",
+    "Hyperlink underlines are thin horizontal vector paths inside the table; they are not table rules and must be ignored when reading the grid (they are shorter than the table width).",
+    "Reference entries use '[1]' and '[2]' markers; detectLists (A-3.2) does not recognise bracketed markers, so p2-refs-list is a reference list in the labels but not a detected list.",
+    "No running header, footer or page number exists on any page (the template text on page 2 even says they should not be added), so none is expected."
+  ]
+}

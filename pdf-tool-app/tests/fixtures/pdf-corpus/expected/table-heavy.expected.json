@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "tolerance": {
+    "textBounds": 2,
+    "vector": 0.5,
+    "formRect": 0.5
+  },
+  "fixture": "table-heavy.pdf",
+  "sha256": "a052032863f3103f2a6f07c3a178f8e1a21a50ed9ae2025004abc27c3197f164",
+  "pageCount": 1,
+  "pages": [
+    {
+      "pageIndex": 0,
+      "width": 595,
+      "height": 842,
+      "textRegions": [
+        {
+          "id": "p0-title",
+          "role": "title",
+          "zone": "full",
+          "bounds": {
+            "left": 51.55,
+            "bottom": 776.17,
+            "right": 296.35,
+            "top": 793.27
+          },
+          "textStart": "Financial Data Summary Table",
+          "textEnd": "Financial Data Summary Table"
+        }
+      ],
+      "tables": [
+        {
+          "id": "p0-table-1",
+          "zone": "full",
+          "bounds": {
+            "left": 49,
+            "bottom": 579,
+            "right": 531,
+            "top": 731
+          },
+          "rows": 5,
+          "columns": 4,
+          "rowEdgesY": [
+            730,
+            700,
+            670,
+            640,
+            610,
+            580
+          ],
+          "colEdgesX": [
+            50,
+            170,
+            290,
+            410,
+            530
+          ],
+          "merged": [],
+          "cells": [
+            [
+              "Period",
+              "Revenue",
+              "Expenses",
+              "Net Profit"
+            ],
+            [
+              "Q1 2026",
+              "$250,000",
+              "$120,000",
+              "$130,000"
+            ],
+            [
+              "Q2 2026",
+              "$500,000",
+              "$240,000",
+              "$260,000"
+            ],
+            [
+              "Q3 2026",
+              "$750,000",
+              "$360,000",
+              "$390,000"
+            ],
+            [
+              "Q4 2026",
+              "$1000,000",
+              "$480,000",
+              "$520,000"
+            ]
+          ]
+        }
+      ],
+      "readingOrder": [
+        "p0-title",
+        "p0-table-1"
+      ]
+    }
+  ],
+  "provenance": {
+    "structure": "Table grid (rows, columns, edges) measured from the vector ruling lines in the PDF and cross-checked against the generator source (scripts/generate-corpus.ts, PDF-03): 6 horizontal and 5 vertical rules.",
+    "geometry": "Text bounds are glyph-tight PDFium bounds; table bounds are the stroke-inclusive union of the rules (a 1pt stroke is reported as 2pt thick).",
+    "text": "Cell text read from PDFium text objects binned into the measured grid and cross-checked against the generator formula."
+  },
+  "repeatedElements": [],
+  "uncertain": [],
+  "limitations": [
+    "Single page: header/footer and page-number detection needs at least 2 pages, so none can be expected.",
+    "Cell text for Q4 is '$1000,000' (no thousands separator on the million): it is what the generator wrote and is recorded as extracted, not corrected.",
+    "The table exists only as vector lines plus free text objects. There is no structure tree, so row/column counts come from the ruling lines, not from the text; text-only heuristics (e.g. extractTables in intelligence-operations.ts) cannot see the rules.",
+    "The first row is a header only by convention (no tagging); there are no merged cells in this fixture."
+  ]
+}
