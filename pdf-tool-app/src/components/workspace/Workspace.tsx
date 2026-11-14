@@ -51,6 +51,8 @@ import { useOcrFlow } from "@/components/workspace/useOcrFlow";
 import { OcrFlowPanel } from "@/components/workspace/OcrFlowPanel";
 import { FormFillPanel } from "@/components/workspace/FormFillPanel";
 import { useFormFill } from "@/components/workspace/useFormFill";
+import { FlattenPanel } from "@/components/workspace/FlattenPanel";
+import { useFlattenForm } from "@/components/workspace/useFlattenForm";
 import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
 import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, reorderFiles, type WorkspaceFile } from "@/lib/workspace/files";
@@ -167,6 +169,7 @@ export function Workspace() {
     "pdf.crop": "crop",
     "pdf.metadata": "metadata",
     "pdf.fill-form": "fill-form",
+    "pdf.flatten": "flatten",
     "pdf.edit": "edit",
   };
   const activeTool = toolIdMap[activeId] || "merge";
@@ -174,6 +177,8 @@ export function Workspace() {
   const ocr = useOcrFlow(active?.file ?? null, activeTool === "ocr", setStatus);
   // AcroForm filling: field list, draft values, validation. Writes a new output; the source file is never replaced.
   const formFill = useFormFill(active?.file ?? null, activeTool === "fill-form");
+  // Flatten: inspection, irreversibility warning and explicit confirmation before a new flattened copy is written.
+  const flatten = useFlattenForm(active?.file ?? null, activeTool === "flatten");
   const acceptsMultiple = capability?.supportsBatch || false;
   const requiredFileCount = acceptsMultiple ? 2 : 1;
 
@@ -327,6 +332,13 @@ export function Workspace() {
             doneTone = outcome.tone;
             break;
           }
+          case "flatten": {
+            const outcome = await flatten.run();
+            nextResults = outcome.results;
+            doneMessage = outcome.message;
+            doneTone = outcome.tone;
+            break;
+          }
           case "pdf-to-image":
             nextResults = await pdfToImage(activeFile, form.imageFormat, 2.0, (msg) => setStatus(msg));
             break;
@@ -472,6 +484,7 @@ export function Workspace() {
                           (!files.length && activeTool !== "blank") ||
                           (activeTool === "ocr" && !!ocr.disabledReason) ||
                           (activeTool === "fill-form" && !!formFill.disabledReason) ||
+                          (activeTool === "flatten" && !!flatten.disabledReason) ||
                           activeTool === "pdf-to-word" ||
                           activeTool === "pdf-to-excel"
                         }
@@ -482,6 +495,8 @@ export function Workspace() {
                             ? ocr.disabledReason ?? undefined
                             : activeTool === "fill-form"
                             ? formFill.disabledReason ?? undefined
+                            : activeTool === "flatten"
+                            ? flatten.disabledReason ?? undefined
                             : undefined
                         }
                         className={clsx(
@@ -790,6 +805,8 @@ export function Workspace() {
                     <OcrFlowPanel flow={ocr} />
                   ) : activeTool === "fill-form" ? (
                     <FormFillPanel flow={formFill} />
+                  ) : activeTool === "flatten" ? (
+                    <FlattenPanel flow={flatten} />
                   ) : (
                     <ToolFields
                       activeTool={activeTool}

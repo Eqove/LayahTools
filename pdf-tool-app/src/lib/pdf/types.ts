@@ -21,6 +21,7 @@ export type PdfToolId =
   | "crop"
   | "metadata"
   | "fill-form"
+  | "flatten"
   | "edit";
 
 export type ToolDescriptor = {

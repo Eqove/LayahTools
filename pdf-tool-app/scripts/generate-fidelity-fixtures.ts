@@ -67,6 +67,7 @@ async function buildFormAllFields(): Promise<Uint8Array> {
   const comments = form.createTextField("t.comments");
   comments.enableMultiline();
   comments.addToPage(page, { x: 200, y: 660, width: 250, height: 52 });
+  comments.setFontSize(10); // pdf-lib sizes the default appearance to the box (44 pt) otherwise; needs the /DA that addToPage creates
 
   label("Code (max 5)", 630);
   const code = form.createTextField("t.code");

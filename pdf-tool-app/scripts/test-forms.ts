@@ -126,6 +126,14 @@ async function main() {
   const rv = Object.fromEntries(reopened.fields.map((f) => [f.name, f.value])) as Record<string, unknown>;
   check("reopened: text values", rv["t.name"] === "Ada Lovelace" && rv["t.code"] === "ABC12");
   check("reopened: multiline text keeps its line break", rv["t.comments"] === "first line\nsecond line");
+  const daSize = Number(/([\d.]+)\s+Tf/.exec((await PDFDocument.load(filled.bytes)).getForm().getTextField("t.comments").acroField.getDefaultAppearance() ?? "")?.[1]);
+  check("multiline field keeps its authored font size", daSize === 10, `size ${daSize}`);
+  // A multiline field whose default appearance asks for auto size (0) gets a fixed readable size, otherwise pdf-lib draws one oversized line.
+  const autoDoc = await PDFDocument.load(bytes);
+  autoDoc.getForm().getTextField("t.comments").acroField.setFontSize(0);
+  const autoFilled = await fillForm(new Uint8Array(await autoDoc.save()), { "t.comments": "first line\nsecond line" });
+  const autoSize = Number(/([\d.]+)\s+Tf/.exec((await PDFDocument.load(autoFilled.bytes)).getForm().getTextField("t.comments").acroField.getDefaultAppearance() ?? "")?.[1]);
+  check("auto-size (0) multiline field is given a fixed readable size", autoSize >= 8 && autoSize <= 14, `size ${autoSize}`);
   check("reopened: checkbox checked", rv["c.subscribe"] === true);
   check("reopened: radio selection", rv["r.plan"] === "pro");
   check("reopened: dropdown selection", rv["d.country"] === "Germany");

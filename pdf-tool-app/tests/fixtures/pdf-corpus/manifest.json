@@ -157,7 +157,7 @@
       "id": "PDF-11",
       "name": "form-all-fields.pdf",
       "category": "form-all-fields",
-      "sha256": "a74acb8b16540039abbbf44cb00a8a984ecd86276e1d2e541f4bb01f6fd0e7b7",
+      "sha256": "243616f95ee691487ca12f8a40a37cdc2a8ab58f3fe86cab2426325e93b94bb1",
       "pageCount": 1,
       "expected": {
         "hasTextLayer": true,

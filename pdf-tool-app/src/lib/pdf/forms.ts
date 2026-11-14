@@ -6,6 +6,7 @@ import {
   PDFDropdown,
   PDFField,
   PDFAcroNonTerminal,
+  PDFArray,
   PDFDict,
   PDFName,
   PDFOptionList,
@@ -14,6 +15,7 @@ import {
   PDFTextField,
   StandardFonts,
 } from "pdf-lib";
+import { compareAnnotations, inspectAnnotations, type AnnotationInfo, type AnnotationInspection } from "./annotations";
 
 /**
  * AcroForm reading and filling (pdf-lib, pure: runs in the browser and in Node tests).
@@ -184,6 +186,16 @@ export async function readFormFields(bytes: Uint8Array | ArrayBuffer): Promise<F
 
 const quote = (s: string) => `"${s}"`;
 
+/** Font size used for multiline fields whose default appearance asks for auto size (0). */
+const MULTILINE_FONT_SIZE = 12;
+
+/** True when the field's /DA font size is 0 (auto) or missing. */
+function hasAutoFontSize(field: PDFTextField): boolean {
+  const da = field.acroField.getDefaultAppearance();
+  const m = da ? /([\d.]+)\s+Tf/.exec(da) : null;
+  return !m || Number(m[1]) === 0;
+}
+
 /** Checks values against the fields. Returns every problem (not only the first); an empty array means writable. */
 export function validateFormValues(fields: FormFieldInfo[], values: FormValues): FieldError[] {
   const errors: FieldError[] = [];
@@ -297,6 +309,8 @@ export async function fillForm(bytes: Uint8Array | ArrayBuffer, values: FormValu
     const value = values[name];
     try {
       if (field instanceof PDFTextField) {
+        // pdf-lib's auto font size for a multiline field draws one oversized line and clips the rest.
+        if (field.isMultiline() && hasAutoFontSize(field)) field.setFontSize(MULTILINE_FONT_SIZE);
         if (value === "") field.setText(undefined);
         else field.setText(value as string);
       } else if (field instanceof PDFCheckBox) {
@@ -326,4 +340,192 @@ export async function fillForm(bytes: Uint8Array | ArrayBuffer, values: FormValu
   const { verification, problems: mismatches } = verifyFilled(info, await readFormFields(out), values);
   if (mismatches.length) throw new FormError("VERIFY_FAILED", `The exported PDF did not match what was entered: ${mismatches.join("; ")}.`);
   return { bytes: out, verification, warnings: info.warnings };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Flattening (A-4.3)
+//
+// pdf-lib's form.flatten() turns the AcroForm fields into page content. It does NOT flatten other annotations
+// (highlights, notes, ink, links, ...): those are left exactly as they are, never removed, and reported. Known pdf-lib
+// defects handled here: widgets without an appearance stream make flatten()/removeField() throw, and flatten() leaves
+// dangling references in each page's /Annots.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export interface FlattenInspection {
+  fieldCount: number;
+  widgetCount: number;
+  /** Non-widget annotations: kept as live annotations, not flattened. */
+  keptByType: Record<string, number>;
+  keptTotal: number;
+  /** Fields whose widgets have no appearance stream (nothing visible to draw). */
+  emptyAppearanceFields: string[];
+  /** Signature fields that hold a signature value; flattening (like any re-save) invalidates it. */
+  signedSignatures: string[];
+  warnings: string[];
+}
+
+function hasNormalAppearance(widget: { dict: PDFDict }): boolean {
+  return !!widget.dict.lookupMaybe(PDFName.of("AP"), PDFDict)?.has(PDFName.of("N"));
+}
+
+export async function inspectForFlatten(bytes: Uint8Array | ArrayBuffer): Promise<FlattenInspection> {
+  const doc = await loadFormDocument(bytes);
+  const info = describeFields(doc);
+  const ann = await inspectAnnotations(bytes);
+  const { Widget: widgets = 0, ...kept } = ann.byType;
+  const out: FlattenInspection = {
+    fieldCount: info.fields.length,
+    widgetCount: widgets,
+    keptByType: kept,
+    keptTotal: Object.values(kept).reduce((a, b) => a + b, 0),
+    emptyAppearanceFields: [],
+    signedSignatures: [],
+    warnings: [...info.warnings],
+  };
+  if (info.hasAcroForm) {
+    for (const field of doc.getForm().getFields()) {
+      if (field.acroField.getWidgets().some((w) => !hasNormalAppearance(w))) out.emptyAppearanceFields.push(field.getName());
+      if (field instanceof PDFSignature && field.acroField.dict.has(PDFName.of("V"))) out.signedSignatures.push(field.getName());
+    }
+  }
+  const unknown = info.fields.filter((f) => f.type === "unknown").map((f) => f.name);
+  if (unknown.length) out.warnings.push(`${unknown.length} field${unknown.length > 1 ? "s" : ""} of an unrecognised type (${unknown.join(", ")}) cannot be flattened and stay as live fields.`);
+  if (out.signedSignatures.length) out.warnings.push(`Signed signature field${out.signedSignatures.length > 1 ? "s" : ""} (${out.signedSignatures.join(", ")}): flattening invalidates the digital signature.`);
+  if (out.keptTotal) out.warnings.push(`${out.keptTotal} other annotation${out.keptTotal > 1 ? "s" : ""} (${Object.entries(kept).map(([t, n]) => `${n} ${t}`).join(", ")}) will be kept as they are. They are not flattened.`);
+  return out;
+}
+
+export interface FlattenCheck {
+  check: string;
+  ok: boolean;
+  detail?: string;
+}
+
+/** Compares annotations/fields before and after flattening. Pure, so its failure paths are testable. */
+export function verifyFlattened(
+  before: AnnotationInspection,
+  after: AnnotationInspection,
+  formAfter: FormInfo,
+  options: { leftFields?: string[] } = {},
+): { checks: FlattenCheck[]; problems: string[] } {
+  const left = new Set(options.leftFields ?? []);
+  const isWidget = (a: AnnotationInfo) => a.subtype === "Widget";
+  const strip = (i: AnnotationInspection, keep: (a: AnnotationInfo) => boolean): AnnotationInspection => ({ ...i, pages: i.pages.map((p) => p.filter(keep)) });
+  const checks: FlattenCheck[] = [];
+  const add = (check: string, ok: boolean, detail?: string) => checks.push({ check, ok, detail: ok ? undefined : detail });
+
+  const extraFields = formAfter.fields.filter((f) => !left.has(f.name)).map((f) => f.name);
+  add("no form fields remain (except those that cannot be flattened)", extraFields.length === 0, `field(s) still present: ${extraFields.join(", ")}`);
+
+  const expectedWidgets = before.pages.flat().filter((a) => isWidget(a) && a.fieldName !== null && left.has(a.fieldName)).length;
+  const widgetsAfter = after.byType.Widget ?? 0;
+  add("no widget annotations remain", widgetsAfter === expectedWidgets, `${widgetsAfter} widget annotation(s) remain, expected ${expectedWidgets}`);
+
+  add("no dangling annotation references", after.dangling <= before.dangling, `dangling references ${before.dangling} -> ${after.dangling}`);
+
+  const diff = compareAnnotations(strip(before, (a) => !isWidget(a)), strip(after, (a) => !isWidget(a)));
+  add("markup annotations preserved unchanged (not removed, not flattened)", diff.ok, diff.messages.join("; "));
+
+  const typeDiffs = Object.keys({ ...before.byType, ...after.byType })
+    .filter((t) => t !== "Widget" && (before.byType[t] ?? 0) !== (after.byType[t] ?? 0))
+    .map((t) => `${t} ${before.byType[t] ?? 0} -> ${after.byType[t] ?? 0}`);
+  add("annotation counts by type unchanged", typeDiffs.length === 0, typeDiffs.join(", "));
+
+  return { checks, problems: checks.filter((c) => !c.ok).map((c) => `${c.check}: ${c.detail}`) };
+}
+
+export interface FlattenReport {
+  fieldsFlattened: number;
+  widgetsRemoved: number;
+  /** Non-widget annotations left in place (not flattened). */
+  annotationsKept: number;
+  keptByType: Record<string, number>;
+  /** Fields that had no appearance stream and so contributed nothing visible. */
+  emptyAppearanceFields: string[];
+  /** Fields whose appearance was generated before flattening because the file had none. */
+  regeneratedAppearances: string[];
+  /** Fields of an unrecognised type that could not be flattened. */
+  leftFields: string[];
+  warnings: string[];
+  verification: FlattenCheck[];
+}
+
+export interface FlattenResult {
+  bytes: Uint8Array;
+  report: FlattenReport;
+}
+
+/** Flattens the AcroForm fields into page content, then reopens the output and verifies it. The input is never modified. */
+export async function flattenForm(bytes: Uint8Array | ArrayBuffer): Promise<FlattenResult> {
+  const doc = await loadFormDocument(bytes);
+  const info = describeFields(doc);
+  if (!info.hasAcroForm || info.fields.length === 0) throw new FormError("NO_FORM", "This PDF has no form fields to flatten.");
+  const pre = await inspectForFlatten(bytes);
+  const beforeAnn = await inspectAnnotations(bytes);
+  const leftFields = info.fields.filter((f) => f.type === "unknown").map((f) => f.name);
+
+  const form = doc.getForm();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const emptied: string[] = [];
+  const regenerated: string[] = [];
+  for (const field of form.getFields()) {
+    const missing = field.acroField.getWidgets().filter((w) => !hasNormalAppearance(w));
+    if (!missing.length) continue;
+    let rebuilt = false;
+    if (typeOf(field) !== "signature" && typeOf(field) !== "button") {
+      try {
+        field.defaultUpdateAppearances(font);
+        rebuilt = field.acroField.getWidgets().every((w) => hasNormalAppearance(w));
+      } catch {
+        rebuilt = false;
+      }
+    }
+    if (rebuilt) {
+      regenerated.push(field.getName());
+      continue;
+    }
+    for (const w of missing) {
+      const r = w.getRectangle();
+      const stream = doc.context.stream("", { Type: "XObject", Subtype: "Form", BBox: [0, 0, r.width, r.height] });
+      w.dict.set(PDFName.of("AP"), doc.context.obj({ N: doc.context.register(stream) }));
+    }
+    emptied.push(field.getName());
+  }
+
+  form.flatten({ updateFieldAppearances: false });
+
+  // pdf-lib leaves references to the deleted widgets in each page's /Annots.
+  for (const page of doc.getPages()) {
+    const annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+    if (!annots) continue;
+    for (let i = annots.size() - 1; i >= 0; i--) if (!(annots.lookup(i) instanceof PDFDict)) annots.remove(i);
+    if (annots.size() === 0) page.node.delete(PDFName.of("Annots"));
+  }
+  if (!leftFields.length) doc.catalog.delete(PDFName.of("AcroForm"));
+
+  const out = new Uint8Array(await doc.save({ updateFieldAppearances: false }));
+
+  const afterAnn = await inspectAnnotations(out);
+  const { checks, problems } = verifyFlattened(beforeAnn, afterAnn, await readFormFields(out), { leftFields });
+  if (problems.length) throw new FormError("VERIFY_FAILED", `The flattened PDF did not pass verification: ${problems.join("; ")}.`);
+
+  const warnings = [...pre.warnings.filter((w) => !/^\d+ other annotation/.test(w))];
+  if (emptied.length) warnings.push(`No visible appearance for ${emptied.join(", ")}: they were removed without drawing anything.`);
+  if (regenerated.length) warnings.push(`The file had no appearance for ${regenerated.join(", ")}; one was generated from the field value before flattening.`);
+  const keptTotal = pre.keptTotal;
+  if (keptTotal) warnings.push(`${keptTotal} other annotation${keptTotal > 1 ? "s were" : " was"} kept as ${keptTotal > 1 ? "annotations" : "an annotation"} and not flattened.`);
+  return {
+    bytes: out,
+    report: {
+      fieldsFlattened: info.fields.length - leftFields.length,
+      widgetsRemoved: (beforeAnn.byType.Widget ?? 0) - (afterAnn.byType.Widget ?? 0),
+      annotationsKept: keptTotal,
+      keptByType: pre.keptByType,
+      emptyAppearanceFields: emptied,
+      regeneratedAppearances: regenerated,
+      leftFields,
+      warnings,
+      verification: checks,
+    },
+  };
 }
