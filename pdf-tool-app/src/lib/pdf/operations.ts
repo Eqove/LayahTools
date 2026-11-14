@@ -294,7 +294,41 @@ export async function signPdf(
   ];
 }
 
-function buildFilename(originalName: string, suffix: string) {
+export interface CropMargins {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export async function cropPdf(file: File, margins: CropMargins) {
+  const source = await PDFDocument.load(await file.arrayBuffer());
+  const pages = source.getPages();
+
+  for (const page of pages) {
+    const { width, height } = page.getSize();
+    const newX = Math.max(0, margins.left);
+    const newY = Math.max(0, margins.bottom);
+    const newWidth = width - newX - Math.max(0, margins.right);
+    const newHeight = height - newY - Math.max(0, margins.top);
+
+    if (newWidth <= 10 || newHeight <= 10) {
+      throw new Error(`Crop margins too large: resulting page dimensions would be ${newWidth.toFixed(0)}x${newHeight.toFixed(0)} pt.`);
+    }
+
+    page.setCropBox(newX, newY, newWidth, newHeight);
+    page.setMediaBox(newX, newY, newWidth, newHeight);
+  }
+
+  return [
+    {
+      filename: buildFilename(file.name, "cropped"),
+      bytes: await source.save(),
+    },
+  ];
+}
+
+export function buildFilename(originalName: string, suffix: string) {
   const sanitizedName = originalName.toLowerCase().endsWith(".pdf")
     ? originalName.slice(0, -4)
     : originalName;

@@ -1,4 +1,4 @@
-import { addFiles, removeFile, replaceFile, resolveActive, type WorkspaceFile } from "../src/lib/workspace/files";
+import { addFiles, removeFile, replaceFile, resolveActive, reorderFiles, type WorkspaceFile } from "../src/lib/workspace/files";
 
 let failed = 0;
 const check = (name: string, ok: boolean) => { console.log(`${ok ? "PASS" : "FAIL"}  ${name}`); if (!ok) failed++; };
@@ -53,6 +53,97 @@ check("replace keeps id and position", edited[1].id === target.id && edited[1].f
 check("replace does not touch other files", edited.filter((_, i) => i !== 1).every((e, i) => e === items.filter((_, j) => j !== 1)[i]));
 // removing everything
 check("removing last file empties collection", removeFile([items[0]], items[0].id).length === 0);
+
+// =========================================================================
+// REORDERING UNIT TESTS (A-1.1 Requirements)
+// =========================================================================
+const baseList: WorkspaceFile[] = [
+  { id: "1", file: pdf("one.pdf", 100, 10) },
+  { id: "2", file: pdf("two.pdf", 200, 20) },
+  { id: "3", file: pdf("three.pdf", 300, 30) },
+  { id: "4", file: pdf("four.pdf", 400, 40) },
+];
+
+// 1. Moving the first file to the last position (index 0 -> 3)
+const firstToLast = reorderFiles(baseList, 0, 3);
+check(
+  "reorderFiles: move first file to last position",
+  firstToLast.length === 4 &&
+    firstToLast.map((f) => f.id).join(",") === "2,3,4,1"
+);
+
+// 2. Moving the last file to the first position (index 3 -> 0)
+const lastToFirst = reorderFiles(baseList, 3, 0);
+check(
+  "reorderFiles: move last file to first position",
+  lastToFirst.length === 4 &&
+    lastToFirst.map((f) => f.id).join(",") === "4,1,2,3"
+);
+
+// 3. Moving a middle file (index 1 -> 2)
+const middleMoved = reorderFiles(baseList, 1, 2);
+check(
+  "reorderFiles: move middle file",
+  middleMoved.length === 4 &&
+    middleMoved.map((f) => f.id).join(",") === "1,3,2,4"
+);
+
+// 4. Moving to the same position (index 2 -> 2)
+const samePos = reorderFiles(baseList, 2, 2);
+check(
+  "reorderFiles: move to same position unchanged",
+  samePos.length === 4 &&
+    samePos.map((f) => f.id).join(",") === "1,2,3,4"
+);
+
+// 5. Empty collection
+const emptyReorder = reorderFiles([], 0, 1);
+check("reorderFiles: empty collection safe", Array.isArray(emptyReorder) && emptyReorder.length === 0);
+
+// Single item collection
+const singleReorder = reorderFiles([baseList[0]], 0, 0);
+check("reorderFiles: single file collection safe", singleReorder.length === 1 && singleReorder[0].id === "1");
+
+// 6. Invalid indexes
+const invalidFrom = reorderFiles(baseList, -1, 2);
+const invalidTo = reorderFiles(baseList, 1, 99);
+check(
+  "reorderFiles: invalid indexes return unchanged copy",
+  invalidFrom.map((f) => f.id).join(",") === "1,2,3,4" &&
+    invalidTo.map((f) => f.id).join(",") === "1,2,3,4"
+);
+
+// 7. Original array immutability
+const freezeOriginal = [...baseList];
+const clonedResult = reorderFiles(freezeOriginal, 0, 2);
+check(
+  "reorderFiles: original array is immutable",
+  freezeOriginal.map((f) => f.id).join(",") === "1,2,3,4" &&
+    clonedResult !== freezeOriginal
+);
+
+// 8. Metadata preservation (file instance, size, lastModified)
+const movedItem = firstToLast[3];
+check(
+  "reorderFiles: file metadata preserved",
+  movedItem.id === "1" &&
+    movedItem.file.name === "one.pdf" &&
+    movedItem.file.size === 100 &&
+    movedItem.file.lastModified === 10
+);
+
+// 9. ID-based reordering (drag-and-drop support)
+const idMoveMiddle = reorderFiles(baseList, "2", "4"); // insert before "4"
+check(
+  "reorderFiles: ID-based move before target",
+  idMoveMiddle.map((f) => f.id).join(",") === "1,3,2,4"
+);
+
+const idMoveToEnd = reorderFiles(baseList, "1", null); // move to end
+check(
+  "reorderFiles: ID-based move to end with null",
+  idMoveToEnd.map((f) => f.id).join(",") === "2,3,4,1"
+);
 
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
 process.exit(failed ? 1 : 0);

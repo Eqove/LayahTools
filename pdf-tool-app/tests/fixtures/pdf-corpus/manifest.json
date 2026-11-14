@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-07T13:30:54.574Z",
+  "passwordForProtectedFixtures": "testpassword123",
+  "fixtures": [
+    {
+      "id": "PDF-01",
+      "name": "simple-text.pdf",
+      "category": "simple",
+      "sha256": "b98f1f708e33a49049b7600bc8c9dfab343857d153b9e8c1866f6f29a3861dbf",
+      "pageCount": 2,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": true,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-02",
+      "name": "multi-column.pdf",
+      "category": "multi-column",
+      "sha256": "0cb8ec3fd9c9cf4909a44ed649b5d9522bbcad9419a142fea9b03035a9d963b0",
+      "pageCount": 3,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-03",
+      "name": "table-heavy.pdf",
+      "category": "table-heavy",
+      "sha256": "a052032863f3103f2a6f07c3a178f8e1a21a50ed9ae2025004abc27c3197f164",
+      "pageCount": 1,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-04",
+      "name": "image-heavy.pdf",
+      "category": "image-heavy",
+      "sha256": "d3400246adfa97be3e8faf8589b1d88403f2faecd3de58a7a79deb5a22a17308",
+      "pageCount": 6,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": true,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-05",
+      "name": "scanned-image-only.pdf",
+      "category": "scanned",
+      "sha256": "59339f5267dd09a1b3dc46d181751fc8efb8f98ed3f6a555189c4d1a79cf97d9",
+      "pageCount": 1,
+      "expected": {
+        "hasTextLayer": false,
+        "hasImages": true,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-06",
+      "name": "rotated-pages.pdf",
+      "category": "rotated",
+      "sha256": "dc0cda55b7092b27ea0feda8c2f8834600609cb46de99527d5964dc0bc6a99dd",
+      "pageCount": 3,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false,
+        "pageRotations": [
+          0,
+          90,
+          180
+        ]
+      }
+    },
+    {
+      "id": "PDF-07",
+      "name": "form-acroform.pdf",
+      "category": "form",
+      "sha256": "4dbdf651baeedd40183e0e248386e16c23e9e13df3e71fd86d9a099c84896463",
+      "pageCount": 1,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": true,
+        "formFields": [
+          "applicant.name",
+          "applicant.email"
+        ],
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-08",
+      "name": "annotated.pdf",
+      "category": "annotated",
+      "sha256": "5d8a4bb89d55094f5a0a143cb2913c8bc2f0cf7adfa6537bb45c7b28cf93dc00",
+      "pageCount": 1,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": true,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-09",
+      "name": "long-document.pdf",
+      "category": "long",
+      "sha256": "46ba72bf91342b18d35702ad477b82063338e7670464dd66fccc39d884f1a024",
+      "pageCount": 25,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-10",
+      "name": "password-protected.pdf",
+      "category": "password-protected",
+      "sha256": "9490091c8e93412888311db91205562525d17a9f132474c525d3e25e20b0d3c3",
+      "pageCount": 1,
+      "expected": {
+        "hasTextLayer": false,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": false,
+        "isEncrypted": true,
+        "password": "testpassword123"
+      }
+    }
+  ]
+}

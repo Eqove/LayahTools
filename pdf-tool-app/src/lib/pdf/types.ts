@@ -18,6 +18,8 @@ export type PdfToolId =
   | "pdf-to-word"
   | "pdf-to-excel"
   | "extract-tables"
+  | "crop"
+  | "metadata"
   | "edit";
 
 export type ToolDescriptor = {

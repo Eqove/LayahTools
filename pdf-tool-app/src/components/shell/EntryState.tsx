@@ -60,10 +60,10 @@ export function EntryState() {
         <div className="font-sans font-bold text-xl tracking-tight">LayahTools</div>
         <div className="flex gap-8 items-center text-sm font-medium">
           <a href="#workspace" className="opacity-90 hover:opacity-100 transition-opacity">PDF</a>
-          <span className="opacity-60 cursor-not-allowed hidden md:inline">Word</span>
-          <span className="opacity-60 cursor-not-allowed hidden md:inline">Excel</span>
-          <span className="opacity-60 cursor-not-allowed hidden md:inline">More</span>
-          <a href="#" className="opacity-90 hover:opacity-100 transition-opacity">Sign In</a>
+          <span title="Word support is coming soon" className="opacity-60 cursor-not-allowed hidden md:inline select-none">Word</span>
+          <span title="Excel support is coming soon" className="opacity-60 cursor-not-allowed hidden md:inline select-none">Excel</span>
+          <span title="Additional document formats coming soon" className="opacity-60 cursor-not-allowed hidden md:inline select-none">More</span>
+          <a href="#" className="opacity-90 hover:opacity-100 transition-opacity" title="Authentication coming in a future update">Sign In</a>
         </div>
       </nav>
 

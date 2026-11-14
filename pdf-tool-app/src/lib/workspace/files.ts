@@ -37,18 +37,57 @@ export const resolveActive = (items: WorkspaceFile[], activeId: string | null) =
 
 /**
  * Move a file entry from one position to another.
- * fromId: the id of the file being dragged.
- * toId: the id of the file it's dropped onto (insert before it).
- * If toId is null, move to end.
+ * Supports both index-based (from: number, to: number) and ID-based (from: string, to: string | null).
+ *
+ * Index-based:
+ * - Moves item from index `from` to index `to`.
+ * - Safely handles invalid indexes, empty collections, and moving to same position.
+ * - Always returns a new array without mutating the input array.
+ *
+ * ID-based:
+ * - `from`: the id of the file being moved.
+ * - `to`: the id of the target file (inserted before it), or `null` to move to the end.
  */
-export function reorderFiles(items: WorkspaceFile[], fromId: string, toId: string | null): WorkspaceFile[] {
-  const fromIdx = items.findIndex(i => i.id === fromId);
-  if (fromIdx === -1) return items;
+export function reorderFiles(
+  items: WorkspaceFile[],
+  from: string | number,
+  to: string | number | null
+): WorkspaceFile[] {
+  if (!items || items.length <= 1) return [...(items || [])];
+
+  // Number / index-based reordering
+  if (typeof from === "number" && typeof to === "number") {
+    if (
+      from < 0 ||
+      from >= items.length ||
+      to < 0 ||
+      to >= items.length ||
+      from === to
+    ) {
+      return [...items];
+    }
+    const result = [...items];
+    const [moved] = result.splice(from, 1);
+    result.splice(to, 0, moved);
+    return result;
+  }
+
+  // ID-based reordering
+  const fromId = String(from);
+  const fromIdx = items.findIndex((i) => i.id === fromId);
+  if (fromIdx === -1) return [...items];
+
   const moved = items[fromIdx];
-  const without = items.filter(i => i.id !== fromId);
-  if (toId === null) return [...without, moved];
-  const toIdx = without.findIndex(i => i.id === toId);
+  const without = items.filter((i) => i.id !== fromId);
+
+  if (to === null) return [...without, moved];
+
+  const toId = String(to);
+  if (fromId === toId) return [...items];
+
+  const toIdx = without.findIndex((i) => i.id === toId);
   if (toIdx === -1) return [...without, moved];
+
   const result = [...without];
   result.splice(toIdx, 0, moved);
   return result;

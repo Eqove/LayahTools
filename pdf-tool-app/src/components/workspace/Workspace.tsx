@@ -20,6 +20,11 @@ const EditorController = dynamic(
   { ssr: false, loading: () => <div className="p-8 text-center text-slate-500">Initializing editor...</div> }
 );
 
+const PageThumbnailSidebar = dynamic(
+  () => import('@/components/workspace/PageThumbnailSidebar').then((mod) => mod.PageThumbnailSidebar),
+  { ssr: false, loading: () => <div className="w-10 bg-white border-r border-slate-200" /> }
+);
+
 import { downloadBytes } from "@/lib/pdf/download";
 import {
   addPageNumbers,
@@ -33,10 +38,16 @@ import {
   rearrangePdf,
   redactPdf,
   signPdf,
+  cropPdf,
 } from "@/lib/pdf/operations";
+import { isEncryptedPdf, unlockEncryptedPdf } from "@/lib/pdf/password";
+import { ErrorBoundary } from "@/components/shell/ErrorBoundary";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { FileSizeWarning } from "@/components/workspace/FileSizeWarning";
+import { PasswordDialog } from "@/components/workspace/PasswordDialog";
+import { MetadataPanel } from "@/components/workspace/MetadataPanel";
 import { compressPdf, ocrPdf } from "@/lib/pdf/heavy-operations";
 import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
-import { pdfToWordCloud, pdfToExcelCloud } from "@/lib/pdf/cloud-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
 import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, reorderFiles, type WorkspaceFile } from "@/lib/workspace/files";
 
@@ -68,6 +79,10 @@ type FormState = {
   signatureDataUrl: string | null;
   compressionLevel: "low" | "recommended" | "strong";
   imageFormat: "jpeg" | "png";
+  cropMarginTop: string;
+  cropMarginRight: string;
+  cropMarginBottom: string;
+  cropMarginLeft: string;
 };
 
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
@@ -88,6 +103,10 @@ const INITIAL_FORM: FormState = {
   signatureDataUrl: null,
   compressionLevel: "recommended",
   imageFormat: "jpeg",
+  cropMarginTop: "20",
+  cropMarginRight: "20",
+  cropMarginBottom: "20",
+  cropMarginLeft: "20",
 };
 
 export function Workspace() {
@@ -106,6 +125,11 @@ export function Workspace() {
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Phase 2 states: Metadata drawer, Password dialog, File size dismissal
+  const [isMetadataOpen, setIsMetadataOpen] = useState(false);
+  const [pendingPasswordFile, setPendingPasswordFile] = useState<File | null>(null);
+  const [dismissedLargeFiles, setDismissedLargeFiles] = useState<Set<string>>(new Set());
 
   // File panel drag-to-reorder state
   const [dragFileId, setDragFileId] = useState<string | null>(null);
@@ -136,6 +160,8 @@ export function Workspace() {
     "pdf.pdf-to-word": "pdf-to-word",
     "pdf.pdf-to-excel": "pdf-to-excel",
     "pdf.extract-tables": "extract-tables",
+    "pdf.crop": "crop",
+    "pdf.metadata": "metadata",
     "pdf.edit": "edit",
   };
   const activeTool = toolIdMap[activeId] || "merge";
@@ -155,15 +181,34 @@ export function Workspace() {
     if (added.length) {
       setItems(r.items);
       setActiveFileId(added[added.length - 1].id);
+
+      // Check if any added PDF is encrypted
+      for (const item of added) {
+        isEncryptedPdf(item.file).then((encrypted) => {
+          if (encrypted) setPendingPasswordFile(item.file);
+        });
+      }
     }
 
     const notes: string[] = [];
     if (r.nonPdf) notes.push(`${r.nonPdf} non-PDF skipped`);
     if (r.duplicates) notes.push(`${r.duplicates} already added`);
     const oversized = added.filter((a) => a.file.size > LARGE_FILE_BYTES).length;
-    if (oversized) notes.push(`${oversized} large file${oversized > 1 ? "s" : ""} (over 50 MB) may be slow or run out of memory`);
+    if (oversized) notes.push(`${oversized} large file${oversized > 1 ? "s" : ""} (over 50 MB)`);
     setStatus(notes.length ? `${added.length} added, ${notes.join(", ")}` : added.length === 1 ? "1 file added" : `${added.length} files added`);
     setStatusTone(r.nonPdf || oversized ? "error" : "neutral");
+  }
+
+  async function handleUnlockPassword(password: string) {
+    if (!pendingPasswordFile) return;
+    const unlocked = await unlockEncryptedPdf(pendingPasswordFile, password);
+    const target = items.find((i) => i.file === pendingPasswordFile);
+    if (target) {
+      replaceFile(target.id, unlocked);
+      setStatus(`Unlocked ${unlocked.name}`);
+      setStatusTone("success");
+    }
+    setPendingPasswordFile(null);
   }
 
   function removeFile(id: string) {
@@ -172,6 +217,16 @@ export function Workspace() {
 
   function handleFileReorder(fromId: string, toId: string | null) {
     setItems((cur) => reorderFiles(cur, fromId, toId));
+  }
+
+  function handleMoveUp(index: number) {
+    if (index <= 0) return;
+    setItems((cur) => reorderFiles(cur, index, index - 1));
+  }
+
+  function handleMoveDown(index: number) {
+    if (index >= items.length - 1) return;
+    setItems((cur) => reorderFiles(cur, index, index + 1));
   }
 
   /** Edits replace the bytes of an entry but keep its id, position and active state. */
@@ -259,14 +314,24 @@ export function Workspace() {
             nextResults = await analyzeDocumentStructure(activeFile, (msg) => setStatus(msg));
             break;
           case "pdf-to-word":
-            nextResults = await pdfToWordCloud(activeFile, (msg) => setStatus(msg));
-            break;
+            throw new Error("PDF to Word is coming soon in Phase 3 (Requires cloud backend).");
           case "pdf-to-excel":
-            nextResults = await pdfToExcelCloud(activeFile, (msg) => setStatus(msg));
-            break;
+            throw new Error("PDF to Excel is coming soon in Phase 3 (Requires cloud backend).");
           case "extract-tables":
             nextResults = await extractTables(activeFile, (msg) => setStatus(msg));
             break;
+          case "crop":
+            nextResults = await cropPdf(activeFile, {
+              top: Number(form.cropMarginTop) || 0,
+              right: Number(form.cropMarginRight) || 0,
+              bottom: Number(form.cropMarginBottom) || 0,
+              left: Number(form.cropMarginLeft) || 0,
+            });
+            break;
+          case "metadata":
+            setIsMetadataOpen(true);
+            setStatus("Document properties opened.");
+            return;
           default:
             throw new Error("This capability is not ready yet.");
         }
@@ -375,13 +440,34 @@ export function Workspace() {
                         <span className="text-[10px]">●</span> {status}
                       </div>
                     )}
-                    {activeTool !== "edit" && <button 
-                      onClick={runTool} 
-                      disabled={isPending || (!files.length && activeTool !== "blank")}
-                      className="bg-layah-primary text-white px-5 py-1.5 rounded-md text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shrink-0"
-                    >
-                      {isPending ? "Processing..." : "Run Tool"}
-                    </button>}
+                    {activeTool !== "edit" && (
+                      <button 
+                        onClick={runTool} 
+                        disabled={
+                          isPending || 
+                          (!files.length && activeTool !== "blank") ||
+                          activeTool === "pdf-to-word" ||
+                          activeTool === "pdf-to-excel"
+                        }
+                        title={
+                          activeTool === "pdf-to-word" || activeTool === "pdf-to-excel"
+                            ? "Coming soon in Phase 3 (Requires cloud processing backend)"
+                            : undefined
+                        }
+                        className={clsx(
+                          "px-5 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm shrink-0",
+                          activeTool === "pdf-to-word" || activeTool === "pdf-to-excel"
+                            ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                            : "bg-layah-primary text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        )}
+                      >
+                        {activeTool === "pdf-to-word" || activeTool === "pdf-to-excel"
+                          ? "Coming Soon"
+                          : isPending
+                          ? "Processing..."
+                          : "Run Tool"}
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -401,57 +487,84 @@ export function Workspace() {
                     }}
                   />
 
-                  {/* Empty State / Dropzone */}
-                  {!files.length && activeTool !== "blank" && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <div className="w-16 h-16 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-slate-400">
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                      </div>
-                      <p className="text-slate-900 font-medium text-lg mb-1">Drop a file here</p>
-                      <p className="text-slate-500 text-sm mb-6">or</p>
-                      <button onClick={openFilePicker} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-md text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
-                        Choose a file
-                      </button>
+                  {/* Large File Warning Banner */}
+                  {activeFile && activeFile.size > LARGE_FILE_BYTES && !dismissedLargeFiles.has(activeFile.name) && (
+                    <div className="p-3 bg-[#e4e7ec] shrink-0 border-b border-amber-200/50">
+                      <FileSizeWarning
+                        fileName={activeFile.name}
+                        fileSizeBytes={activeFile.size}
+                        onDismiss={() => {
+                          setDismissedLargeFiles((prev) => new Set([...prev, activeFile.name]));
+                        }}
+                      />
                     </div>
                   )}
 
-                  {/* Edit Tool Integration */}
-                  {files.length > 0 && activeTool === "edit" && (
-                     <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} />
-                  )}
-
-                  {/* PDF Viewer */}
-                  {files.length > 0 && activeTool !== "blank" && activeTool !== "edit" && (
-                     <PdfViewer 
-                       file={activeFile} 
-                       viewMode={activeTool === "rearrange" ? "grid" : "scroll"}
-                       pageOrder={activeTool === "rearrange" ? form.pageOrder : undefined}
-                       onPageReorder={(order) => updateForm("pageOrder", order)}
-                       renderPageOverlay={(pageIndex) => {
-                         if (activeTool === "redact") {
-                           return <RedactOverlay pageIndex={pageIndex} redactions={form.redactions} onChange={(redactions) => updateForm("redactions", redactions)} />;
-                         }
-                         if (activeTool === "sign") {
-                           return <SignOverlay pageIndex={pageIndex} signatures={form.signatures} onChange={(signatures) => updateForm("signatures", signatures)} activeSignatureDataUrl={form.signatureDataUrl} />;
-                         }
-                         return null;
-                       }}
-                     />
-                  )}
-                  
-                  {/* Blank PDF View Placeholder */}
-                  {activeTool === "blank" && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div 
-                        className="bg-white shadow-md border border-slate-200" 
-                        style={{ width: `${form.blankWidth}px`, height: `${form.blankHeight}px`, transform: 'scale(0.7)' }}
-                      >
-                         <div className="p-12 text-slate-400 text-center font-medium opacity-50">
-                            Blank PDF Preview
-                         </div>
+                  <ErrorBoundary fallbackTitle="Document viewer encountered an issue" onReset={() => setStatus("Viewer refreshed.")}>
+                    {/* Empty State / Dropzone */}
+                    {!files.length && activeTool !== "blank" && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+                        <EmptyState
+                          title="Drop a PDF file here"
+                          description="Or browse files from your computer to start editing and organizing."
+                          actionLabel="Choose a file"
+                          onAction={openFilePicker}
+                        />
                       </div>
-                    </div>
-                  )}
+                    )}
+
+                    {/* Edit Tool Integration */}
+                    {files.length > 0 && activeTool === "edit" && (
+                       <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} />
+                    )}
+
+                    {/* PDF Viewer with Page Thumbnails Sidebar */}
+                    {files.length > 0 && activeTool !== "blank" && activeTool !== "edit" && (
+                      <div className="flex-1 flex overflow-hidden">
+                        <PageThumbnailSidebar
+                          file={activeFile}
+                          onFileModified={(updated) => replaceFile(active.id, updated)}
+                          onExtractOutput={async (extracted) => {
+                            const bytes = new Uint8Array(await extracted.arrayBuffer());
+                            setResults((prev) => [{ filename: extracted.name, bytes, sourceSize: activeFile?.size }, ...prev]);
+                            setStatus(`Extracted page output ready: ${extracted.name}`);
+                            setStatusTone("success");
+                          }}
+                        />
+                        <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
+                          <PdfViewer 
+                            file={activeFile} 
+                            viewMode={activeTool === "rearrange" ? "grid" : "scroll"}
+                            pageOrder={activeTool === "rearrange" ? form.pageOrder : undefined}
+                            onPageReorder={(order) => updateForm("pageOrder", order)}
+                            renderPageOverlay={(pageIndex) => {
+                              if (activeTool === "redact") {
+                                return <RedactOverlay pageIndex={pageIndex} redactions={form.redactions} onChange={(redactions) => updateForm("redactions", redactions)} />;
+                              }
+                              if (activeTool === "sign") {
+                                return <SignOverlay pageIndex={pageIndex} signatures={form.signatures} onChange={(signatures) => updateForm("signatures", signatures)} activeSignatureDataUrl={form.signatureDataUrl} />;
+                              }
+                              return null;
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Blank PDF View Placeholder */}
+                    {activeTool === "blank" && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div 
+                          className="bg-white shadow-md border border-slate-200" 
+                          style={{ width: `${form.blankWidth}px`, height: `${form.blankHeight}px`, transform: 'scale(0.7)' }}
+                        >
+                           <div className="p-12 text-slate-400 text-center font-medium opacity-50">
+                              Blank PDF Preview
+                           </div>
+                        </div>
+                      </div>
+                    )}
+                  </ErrorBoundary>
                 </div>
               </div>
             ) : (
@@ -485,7 +598,7 @@ export function Workspace() {
             </div>
 
             <div className="flex flex-col gap-1 mb-8">
-              {items.length > 0 ? items.map((it) => (
+              {items.length > 0 ? items.map((it, idx) => (
                 <div
                   key={it.id}
                   draggable
@@ -496,33 +609,97 @@ export function Workspace() {
                   onDrop={(e) => { e.preventDefault(); if (dragFileId && dragFileId !== it.id) handleFileReorder(dragFileId, it.id); setDragFileId(null); setDragOverFileId(null); }}
                   onClick={() => setActiveFileId(it.id)}
                   className={clsx(
-                    "border p-3 rounded-lg flex items-start justify-between group cursor-pointer transition-all",
+                    "border p-2.5 rounded-lg flex items-center justify-between group cursor-pointer transition-all gap-2",
                     dragOverFileId === it.id && dragFileId !== it.id ? "border-blue-400 bg-blue-50 shadow-sm" : "",
                     dragFileId === it.id ? "opacity-40" : "",
                     it.id === active?.id && dragFileId !== it.id ? "bg-blue-50 border-blue-200" : !dragOverFileId || dragOverFileId !== it.id ? "bg-slate-50 border-slate-100 hover:border-slate-200" : ""
                   )}
                   aria-current={it.id === active?.id}
                 >
-                  {/* Drag handle */}
-                  <div className="flex items-start gap-2 min-w-0 flex-1 pr-2">
-                    <span className="text-slate-300 hover:text-slate-400 cursor-grab active:cursor-grabbing pt-0.5 shrink-0 select-none" title="Drag to reorder">
+                  {/* Order badge & Drag handle */}
+                  <div className="flex items-center gap-1.5 shrink-0 select-none">
+                    <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-200/80 rounded px-1.5 py-0.5" title={`File #${idx + 1}`}>
+                      #{idx + 1}
+                    </span>
+                    <span className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing p-0.5" title="Drag to reorder">
                       <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M7 2a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM7 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM7 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM17 2a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM17 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM17 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0z" />
                       </svg>
                     </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900 truncate" title={it.file.name}>{it.file.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {(it.file.size / 1024 / 1024).toFixed(2)} MB{it.id === active?.id && items.length > 1 ? " · active" : ""}
-                      </p>
-                    </div>
                   </div>
-                  <button aria-label={`Remove ${it.file.name}`} onClick={(e) => { e.stopPropagation(); removeFile(it.id); }} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
+
+                  {/* File name & size */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-slate-900 truncate" title={it.file.name}>{it.file.name}</p>
+                      <button
+                        type="button"
+                        title="View document properties"
+                        aria-label={`View properties for ${it.file.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveFileId(it.id);
+                          setIsMetadataOpen(true);
+                        }}
+                        className="text-slate-400 hover:text-layah-primary p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {(it.file.size / 1024 / 1024).toFixed(2)} MB{it.id === active?.id && items.length > 1 ? " · active" : ""}
+                    </p>
+                  </div>
+
+                  {/* Actions: Move Up, Move Down, Remove */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      aria-label={`Move ${it.file.name} up`}
+                      title="Move up"
+                      disabled={idx === 0}
+                      onClick={(e) => { e.stopPropagation(); handleMoveUp(idx); }}
+                      className="text-slate-400 hover:text-blue-600 disabled:opacity-20 disabled:hover:text-slate-400 p-1 rounded hover:bg-white transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move ${it.file.name} down`}
+                      title="Move down"
+                      disabled={idx === items.length - 1}
+                      onClick={(e) => { e.stopPropagation(); handleMoveDown(idx); }}
+                      className="text-slate-400 hover:text-blue-600 disabled:opacity-20 disabled:hover:text-slate-400 p-1 rounded hover:bg-white transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${it.file.name}`}
+                      title="Remove file"
+                      onClick={(e) => { e.stopPropagation(); removeFile(it.id); }}
+                      className="text-slate-400 hover:text-red-500 opacity-60 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded hover:bg-white ml-0.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               )) : (
-                <p className="text-sm text-slate-500 text-center py-4">No files loaded</p>
+                <EmptyState
+                  title="No files loaded"
+                  description="Add PDF files to begin."
+                  actionLabel="Choose files"
+                  onAction={openFilePicker}
+                  className="py-6"
+                />
               )}
               {/* Drop zone at end (move to last position) */}
               {dragFileId && (
@@ -579,7 +756,12 @@ export function Workspace() {
                   <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Configuration</h3>
                 </div>
                 <div className="flex flex-col gap-4">
-                  <ToolFields activeTool={activeTool} form={form} updateForm={updateForm} />
+                  <ToolFields
+                    activeTool={activeTool}
+                    form={form}
+                    updateForm={updateForm}
+                    onOpenMetadata={() => setIsMetadataOpen(true)}
+                  />
                 </div>
               </div>
             )}
@@ -588,6 +770,21 @@ export function Workspace() {
         </aside>
 
       </div>
+
+      <PasswordDialog
+        isOpen={!!pendingPasswordFile}
+        fileName={pendingPasswordFile?.name || ""}
+        onUnlock={handleUnlockPassword}
+        onCancel={() => setPendingPasswordFile(null)}
+      />
+
+      {activeFile && (
+        <MetadataPanel
+          isOpen={isMetadataOpen}
+          file={activeFile}
+          onClose={() => setIsMetadataOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -597,10 +794,12 @@ function ToolFields({
   activeTool,
   form,
   updateForm,
+  onOpenMetadata,
 }: {
   activeTool: PdfToolId;
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  onOpenMetadata?: () => void;
 }) {
   const inputClass = "w-full border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1";
   const labelClass = "block text-sm font-medium text-slate-700 mb-3";
@@ -680,8 +879,13 @@ function ToolFields({
 
   if (activeTool === "redact") {
     return (
-      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
-        Drag directly on the document pages in the viewer to draw redaction regions.
+      <div className="flex flex-col gap-2">
+        <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
+          Drag directly on the document pages in the viewer to draw redaction regions.
+        </div>
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2.5 rounded-md leading-relaxed">
+          <strong>Security Notice:</strong> Visual cover is not secure redaction. Black boxes overlay the visual layer; underlying streams must be sanitized for sensitive legal documents.
+        </div>
       </div>
     );
   }
@@ -768,9 +972,15 @@ function ToolFields({
   }
 
   if (activeTool === "pdf-to-word" || activeTool === "pdf-to-excel") {
+    const targetName = activeTool === "pdf-to-word" ? "Word (.docx)" : "Excel (.xlsx)";
     return (
-      <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-md">
-        This capability requires a cloud backend (e.g., Adobe PDF Services) to preserve exact formatting.
+      <div className="flex flex-col gap-2">
+        <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 p-3 rounded-md">
+          Exporting to editable {targetName} formats with exact layout preservation requires server-side cloud converters.
+        </div>
+        <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-2.5 rounded-md font-medium">
+          Status: Coming soon in Phase 3 (Cloud Conversion Engine).
+        </div>
       </div>
     );
   }
@@ -779,6 +989,51 @@ function ToolFields({
     return (
       <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
         Uses local heuristics to detect tabular data (rows and columns). Outputs structured JSON.
+      </div>
+    );
+  }
+
+  if (activeTool === "crop") {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 p-2.5 rounded-md leading-relaxed">
+          Specify margin to trim from each edge (in points, 72 pt = 1 inch). PDF bottom-left coordinate system is applied deterministically.
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className={labelClass}>
+            Top (pt)
+            <input type="number" min="0" className={inputClass} value={form.cropMarginTop} onChange={(e) => updateForm("cropMarginTop", e.target.value)} />
+          </label>
+          <label className={labelClass}>
+            Bottom (pt)
+            <input type="number" min="0" className={inputClass} value={form.cropMarginBottom} onChange={(e) => updateForm("cropMarginBottom", e.target.value)} />
+          </label>
+          <label className={labelClass}>
+            Left (pt)
+            <input type="number" min="0" className={inputClass} value={form.cropMarginLeft} onChange={(e) => updateForm("cropMarginLeft", e.target.value)} />
+          </label>
+          <label className={labelClass}>
+            Right (pt)
+            <input type="number" min="0" className={inputClass} value={form.cropMarginRight} onChange={(e) => updateForm("cropMarginRight", e.target.value)} />
+          </label>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTool === "metadata") {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 p-2.5 rounded-md leading-relaxed">
+          Inspect document properties, title, author, creation date, producer, page count, and file statistics.
+        </div>
+        <button
+          type="button"
+          onClick={() => onOpenMetadata?.()}
+          className="w-full py-2 bg-layah-primary text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Inspect Properties
+        </button>
       </div>
     );
   }
