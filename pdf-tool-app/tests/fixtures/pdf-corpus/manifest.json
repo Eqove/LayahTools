@@ -54,7 +54,7 @@
       "expected": {
         "hasTextLayer": true,
         "hasImages": true,
-        "hasAnnotations": false,
+        "hasAnnotations": true,
         "hasForms": false,
         "isEncrypted": false
       }
@@ -119,7 +119,7 @@
       "expected": {
         "hasTextLayer": true,
         "hasImages": false,
-        "hasAnnotations": true,
+        "hasAnnotations": false,
         "hasForms": false,
         "isEncrypted": false
       }
@@ -151,6 +151,61 @@
         "hasForms": false,
         "isEncrypted": true,
         "password": "testpassword123"
+      }
+    },
+    {
+      "id": "PDF-11",
+      "name": "form-all-fields.pdf",
+      "category": "form-all-fields",
+      "sha256": "a74acb8b16540039abbbf44cb00a8a984ecd86276e1d2e541f4bb01f6fd0e7b7",
+      "pageCount": 1,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": false,
+        "hasForms": true,
+        "formFields": [
+          "t.name",
+          "t.comments",
+          "t.code",
+          "c.subscribe",
+          "r.plan",
+          "d.country",
+          "o.interests",
+          "t.reference",
+          "b.submit",
+          "s.signature"
+        ],
+        "isEncrypted": false
+      }
+    },
+    {
+      "id": "PDF-12",
+      "name": "annotations-markup.pdf",
+      "category": "annotations",
+      "sha256": "bdd7cdfb44b2690a805888955ddb71f05899f418f0e97d49bb4fbf40d471920d",
+      "pageCount": 2,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": true,
+        "hasForms": true,
+        "formFields": [
+          "reviewer.name"
+        ],
+        "annotationSubtypes": [
+          "Highlight",
+          "Underline",
+          "StrikeOut",
+          "Text",
+          "Popup",
+          "Ink",
+          "FreeText",
+          "Square",
+          "Link",
+          "Widget"
+        ],
+        "isEncrypted": false
       }
     }
   ]
