@@ -6,9 +6,13 @@ const wasm = () => new Uint8Array(fs.readFileSync("node_modules/@embedpdf/pdfium
 
 /** Test-only: reads text objects per page through the PDFium engine (read-only; the engine is not modified). */
 export async function loadPageTexts(pdfPath: string): Promise<PageText[]> {
+  return loadPageTextsFromBytes(new Uint8Array(fs.readFileSync(pdfPath)));
+}
+
+export async function loadPageTextsFromBytes(bytes: Uint8Array): Promise<PageText[]> {
   const engine = new PdfEditorEngine();
   await engine.initialize(wasm());
-  await engine.load(new Uint8Array(fs.readFileSync(pdfPath)));
+  await engine.load(bytes);
   try {
     const pages: PageText[] = [];
     const n = await engine.getPageCount();

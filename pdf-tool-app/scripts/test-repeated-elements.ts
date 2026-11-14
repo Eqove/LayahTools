@@ -109,7 +109,7 @@ const pn = (fmt: (n: number) => string, n = 6, x = 290, y = 30) => Array.from({ 
   );
   check("title page without number: numbers on pages 1..5", sparse.length === 1 && JSON.stringify(sparse[0].values) === "[2,3,4,5,6]" && sparse[0].pageIndexes[0] === 1);
   const withHeader = detectRepeatedElements(
-    pn((n) => `Page ${n}`).map((p, i) => ({ ...p, items: [...p.items, item("ACME Corp Confidential", 50, 800)] }))
+    pn((n) => `Page ${n}`).map((p) => ({ ...p, items: [...p.items, item("ACME Corp Confidential", 50, 800)] }))
   );
   check("header + page number are reported separately", kinds(withHeader, "HEADER").length === 1 && kinds(withHeader, "PAGE_NUMBER").length === 1 && withHeader.length === 2);
 }
