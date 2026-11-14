@@ -6,10 +6,15 @@ import {
   createBlankPdf,
   deletePdfPages,
   extractPdfPages,
+  mergePdfFiles,
+  rearrangePdf,
+  redactPdf,
   rotatePdf,
   splitPdfByRanges,
   watermarkPdf,
 } from "../src/lib/pdf/operations";
+import { rotateSinglePage } from "../src/lib/pdf/page-actions";
+import { addsObjects, compareSnapshots, formatReport, rotatedBy, snapshotPdf, writeReports, type FidelityReport, type FidelitySpec } from "./lib/fidelity";
 
 const CORPUS_DIR = path.resolve(__dirname, "../tests/fixtures/pdf-corpus");
 const MANIFEST_PATH = path.join(CORPUS_DIR, "manifest.json");
@@ -147,6 +152,38 @@ async function runRegressionSuite() {
     fields.includes("applicant.name") && fields.includes("applicant.email"),
     fields.join(", ")
   );
+
+  // -------------------------------------------------------------
+  // 3. Fidelity: affected vs unaffected pages (A-4.1, on top of A-1.7 / A-1.8)
+  // -------------------------------------------------------------
+  console.log("\n--- 3. Fidelity: affected vs unaffected pages ---");
+  const reports: FidelityReport[] = [];
+  const fidelity = async (fixture: string, operation: string, out: Uint8Array, spec: Omit<FidelitySpec, "fixture" | "operation">) => {
+    const b = await snapshotPdf(new Uint8Array(fs.readFileSync(path.join(CORPUS_DIR, fixture))));
+    const report = compareSnapshots(b, await snapshotPdf(out), { fixture, operation, ...spec });
+    reports.push(report);
+    const group = (g: FidelityReport["affected"]) => (g.results.length ? `${g.pages.map((p) => p + 1).join(",")} ${g.pass ? "PASS" : "FAIL"}` : "none");
+    check(`Fidelity ${fixture}: ${operation}`, report.pass, `affected: ${group(report.affected)}; unaffected: ${group(report.unaffected)}`);
+    if (!report.pass) console.log(formatReport(report));
+  };
+  const asBytes = async (f: File) => new Uint8Array(await f.arrayBuffer());
+
+  await fidelity("multi-column.pdf", "rotate page 2 by 90", await asBytes(await rotateSinglePage(multiColFile, 1, 90)), { affectedPages: [1], expectAffected: rotatedBy(90) });
+  await fidelity("multi-column.pdf", "rotate all pages by 90", rotatedOut[0].bytes, { affectedPages: [0, 1, 2], expectAffected: rotatedBy(90) });
+  await fidelity("multi-column.pdf", "delete page 2", deletedOut[0].bytes, { affectedPages: [], pageMap: [0, null, 1] });
+  await fidelity("multi-column.pdf", "rearrange to 3,1,2", (await rearrangePdf(multiColFile, [2, 0, 1]))[0].bytes, { affectedPages: [], pageMap: [1, 2, 0] });
+  await fidelity(
+    "multi-column.pdf",
+    "draw a rectangle on page 1 (redact)",
+    (await redactPdf(multiColFile, [{ pageIndex: 0, x: 0.1, y: 0.1, width: 0.2, height: 0.05 }]))[0].bytes,
+    { affectedPages: [0], expectAffected: addsObjects({ path: 1 }) },
+  );
+  await fidelity("table-heavy.pdf", "watermark", watermarkedOut[0].bytes, { affectedPages: [0], expectAffected: addsObjects({ text: 1 }) });
+  await fidelity("simple-text.pdf", "add page numbers", pagedOut[0].bytes, { affectedPages: [0, 1], expectAffected: addsObjects({ text: 1 }) });
+  await fidelity("long-document.pdf", "extract pages 1-2", extractedOut[0].bytes, { affectedPages: [], pageMap: Array.from({ length: 25 }, (_, i) => (i < 2 ? i : null)) });
+  await fidelity("simple-text.pdf", "merge with table-heavy.pdf", (await mergePdfFiles([simpleFile, tableFile]))[0].bytes, { affectedPages: [], pageMap: [0, 1], addedPages: [2] });
+  const reportPath = writeReports(reports);
+  check("Fidelity report written", fs.existsSync(reportPath), reportPath);
 
   console.log(`\n=================================================`);
   console.log(failed ? `${failed} TESTS FAILED` : "ALL REGRESSION SUITE TESTS PASSED");
