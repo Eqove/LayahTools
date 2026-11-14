@@ -208,10 +208,19 @@ const pn = (fmt: (n: number) => string, n = 6, x = 290, y = 30) => Array.from({ 
 
 // =============== 11. groupIntoLines (shared helper) ===============
 {
-  const lines = groupIntoLines([item("world", 90, 100.5), item("hello", 50, 100), item("below", 50, 80)]);
+  const lines = groupIntoLines([item("world", 82, 100.5), item("hello", 50, 100), item("below", 50, 80)]);
   check("lines: same baseline merged left-to-right, top-to-bottom order", lines.length === 2 && lines[0].text === "hello world" && lines[1].text === "below");
   const cols = groupIntoLines([item("left", 50, 100), item("right", 320, 100)]);
   check("lines: far-apart items on one baseline are split (columns)", cols.length === 2 && cols[0].text === "left" && cols[1].text === "right");
+  const stray = groupIntoLines([item("end of the sentence", 50, 100), { text: ".", bounds: { left: 145, bottom: 100, right: 147, top: 101.3 } }]);
+  check("lines: glyph-tight punctuation joins its line (no stray one-char line)", stray.length === 1 && stray[0].text === "end of the sentence.");
+  const offset = groupIntoLines([
+    item("left column line one", 50, 100), item("right column line one", 300, 103.5),
+    item("left column line two", 50, 88), item("right column line two", 300, 91.5),
+  ], { maxGap: 14 });
+  check("lines: columns with offset baselines stay separate lines", offset.length === 4 && offset.every((l) => /^(left|right) column line (one|two)$/.test(l.text)), JSON.stringify(offset.map((l) => l.text)));
+  const tall = groupIntoLines([item("base", 50, 100), { text: "2", bounds: { left: 70, bottom: 106, right: 75, top: 111 } }]);
+  check("lines: superscript overlapping the line joins it", tall.length === 1);
   check("lines: invalid input is skipped", groupIntoLines([null as any, { text: "x" } as any, item("ok", 1, 1)]).length === 1 && groupIntoLines(undefined as any).length === 0);
 }
 
@@ -229,6 +238,13 @@ async function realPdfs() {
   const mc = await loadPageTexts(dir + "multi-column.pdf");
   check("multi-column.pdf: no false positives from dense two-column body", detectRepeatedElements(mc).length === 0);
   check("multi-column.pdf: deterministic", JSON.stringify(detectRepeatedElements(mc)) === JSON.stringify(detectRepeatedElements(mc)));
+
+  // line grouping on the real two-column page: PDFium splits words into fragments and the period is its own object
+  const l0 = groupIntoLines(mc[0].items);
+  check("multi-column.pdf p1: no stray 1-2 char lines from fragmented text objects", l0.every((l) => l.text.length > 2), JSON.stringify(l0.filter((l) => l.text.length <= 2).map((l) => l.text)));
+  check("multi-column.pdf p1: only the centred title crosses the column gutter", l0.filter((l) => l.bounds.left < 297 && l.bounds.right > 315).map((l) => l.text).join("|") === "USENIX Example Paper");
+  check("multi-column.pdf p1: heading assembled from fragments ('2 R' + 'elated Work')", l0.some((l) => l.text === "2 Related Work"));
+  check("multi-column.pdf p3: no line crosses the gutter", groupIntoLines(mc[2].items).every((l) => !(l.bounds.left < 297 && l.bounds.right > 315)));
 
   for (const f of ["simple-text.pdf", "table-heavy.pdf", "scanned-image-only.pdf"]) {
     const pages = await loadPageTexts(dir + f);
