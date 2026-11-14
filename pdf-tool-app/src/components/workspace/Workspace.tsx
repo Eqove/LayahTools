@@ -46,7 +46,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FileSizeWarning } from "@/components/workspace/FileSizeWarning";
 import { PasswordDialog } from "@/components/workspace/PasswordDialog";
 import { MetadataPanel } from "@/components/workspace/MetadataPanel";
-import { compressPdf, ocrPdf } from "@/lib/pdf/heavy-operations";
+import { compressPdf } from "@/lib/pdf/heavy-operations";
+import { useOcrFlow } from "@/components/workspace/useOcrFlow";
+import { OcrFlowPanel } from "@/components/workspace/OcrFlowPanel";
 import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
 import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, reorderFiles, type WorkspaceFile } from "@/lib/workspace/files";
@@ -165,6 +167,8 @@ export function Workspace() {
     "pdf.edit": "edit",
   };
   const activeTool = toolIdMap[activeId] || "merge";
+  // Scanned-PDF flow for the OCR tool: text-layer check, page statuses, OCR on the chosen pages.
+  const ocr = useOcrFlow(active?.file ?? null, activeTool === "ocr", setStatus);
   const acceptsMultiple = capability?.supportsBatch || false;
   const requiredFileCount = acceptsMultiple ? 2 : 1;
 
@@ -257,6 +261,8 @@ export function Workspace() {
         setStatusTone("neutral");
 
         let nextResults: StudioResult[] = [];
+        let doneMessage: string | undefined;
+        let doneTone: "success" | "error" = "success";
 
         switch (activeTool) {
           case "merge":
@@ -301,9 +307,14 @@ export function Workspace() {
           case "compress":
             nextResults = await compressPdf(activeFile, form.compressionLevel, (msg) => setStatus(msg));
             break;
-          case "ocr":
-            nextResults = await ocrPdf(activeFile, (msg) => setStatus(msg));
+          case "ocr": {
+            // The original stays in FILES untouched; the searchable copy goes to Outputs like any other result.
+            const outcome = await ocr.run();
+            nextResults = outcome.results;
+            doneMessage = outcome.message;
+            doneTone = outcome.tone;
             break;
+          }
           case "pdf-to-image":
             nextResults = await pdfToImage(activeFile, form.imageFormat, 2.0, (msg) => setStatus(msg));
             break;
@@ -339,11 +350,12 @@ export function Workspace() {
         const tagged = nextResults.map((r) => ({ ...r, sourceSize: activeFile?.size }));
         setResults((prev) => [...tagged, ...prev]);
         setStatus(
-          nextResults.length === 1
-            ? "1 output ready"
-            : `${nextResults.length} outputs ready`
+          doneMessage ??
+            (nextResults.length === 1
+              ? "1 output ready"
+              : `${nextResults.length} outputs ready`)
         );
-        setStatusTone("success");
+        setStatusTone(doneTone);
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Something went wrong.");
         setStatusTone("error");
@@ -446,12 +458,15 @@ export function Workspace() {
                         disabled={
                           isPending || 
                           (!files.length && activeTool !== "blank") ||
+                          (activeTool === "ocr" && !!ocr.disabledReason) ||
                           activeTool === "pdf-to-word" ||
                           activeTool === "pdf-to-excel"
                         }
                         title={
                           activeTool === "pdf-to-word" || activeTool === "pdf-to-excel"
                             ? "Coming soon in Phase 3 (Requires cloud processing backend)"
+                            : activeTool === "ocr"
+                            ? ocr.disabledReason ?? undefined
                             : undefined
                         }
                         className={clsx(
@@ -756,12 +771,16 @@ export function Workspace() {
                   <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Configuration</h3>
                 </div>
                 <div className="flex flex-col gap-4">
-                  <ToolFields
-                    activeTool={activeTool}
-                    form={form}
-                    updateForm={updateForm}
-                    onOpenMetadata={() => setIsMetadataOpen(true)}
-                  />
+                  {activeTool === "ocr" ? (
+                    <OcrFlowPanel flow={ocr} />
+                  ) : (
+                    <ToolFields
+                      activeTool={activeTool}
+                      form={form}
+                      updateForm={updateForm}
+                      onOpenMetadata={() => setIsMetadataOpen(true)}
+                    />
+                  )}
                 </div>
               </div>
             )}
@@ -930,15 +949,6 @@ function ToolFields({
         <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 p-3 rounded-md">
           Note: V1 Compression attempts structural reduction via pdf-lib. True image downsampling requires backend processing.
         </div>
-      </div>
-    );
-  }
-
-  if (activeTool === "ocr") {
-    return (
-      <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
-        This tool uses local WASM (Tesseract) to scan images and build a searchable text layer. 
-        It runs entirely in your browser.
       </div>
     );
   }
