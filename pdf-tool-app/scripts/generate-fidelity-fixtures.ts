@@ -37,7 +37,7 @@ function addAnnot(doc: PDFDocument, pageIndex: number, dict: Record<string, unkn
   const h = rect[3] - rect[1];
   const entries: Record<string, unknown> = { Type: "Annot", Rect: rect, F: 4, P: page.ref, ...dict };
   if (ap !== undefined) entries.AP = { N: appearance(doc, w, h, ap) };
-  const ref = doc.context.register(doc.context.obj(entries));
+  const ref = doc.context.register(doc.context.obj(entries as never));
   let annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
   if (!annots) {
     annots = doc.context.obj([]);

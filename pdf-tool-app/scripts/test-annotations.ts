@@ -43,7 +43,7 @@ async function main() {
   check("page 1 has 10 annotations, page 2 has 1", ins.pages[0].length === 10 && ins.pages[1].length === 1);
   check("no dangling references", ins.dangling === 0);
   const hl = ins.pages[0].find((a) => a.name === "hl-1")!;
-  check("highlight: rect, colour, contents, 1 quad", !!hl && hl.rect[0] === 48 && hl.rect[3] === 754 && JSON.stringify(hl.color) === "[1,1,0]" && hl.contents === "important" && hl.quadPointCount === 1);
+  check("highlight: rect, colour, contents, 1 quad", !!hl && hl.rect![0] === 48 && hl.rect![3] === 754 && JSON.stringify(hl.color) === "[1,1,0]" && hl.contents === "important" && hl.quadPointCount === 1);
   check("highlight has an appearance stream", hl.hasAppearance);
   const note = ins.pages[0].find((a) => a.name === "note-1")!;
   check("sticky note links to its popup", note.hasPopup);

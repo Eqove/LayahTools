@@ -49,6 +49,8 @@ import { MetadataPanel } from "@/components/workspace/MetadataPanel";
 import { compressPdf } from "@/lib/pdf/heavy-operations";
 import { useOcrFlow } from "@/components/workspace/useOcrFlow";
 import { OcrFlowPanel } from "@/components/workspace/OcrFlowPanel";
+import { FormFillPanel } from "@/components/workspace/FormFillPanel";
+import { useFormFill } from "@/components/workspace/useFormFill";
 import { pdfToImage, extractPdfText, analyzeDocumentStructure, extractTables } from "@/lib/pdf/intelligence-operations";
 import type { PdfToolId } from "@/lib/pdf/types";
 import { addFiles, removeFile as dropFile, replaceFile as swapFile, resolveActive, reorderFiles, type WorkspaceFile } from "@/lib/workspace/files";
@@ -164,11 +166,14 @@ export function Workspace() {
     "pdf.extract-tables": "extract-tables",
     "pdf.crop": "crop",
     "pdf.metadata": "metadata",
+    "pdf.fill-form": "fill-form",
     "pdf.edit": "edit",
   };
   const activeTool = toolIdMap[activeId] || "merge";
   // Scanned-PDF flow for the OCR tool: text-layer check, page statuses, OCR on the chosen pages.
   const ocr = useOcrFlow(active?.file ?? null, activeTool === "ocr", setStatus);
+  // AcroForm filling: field list, draft values, validation. Writes a new output; the source file is never replaced.
+  const formFill = useFormFill(active?.file ?? null, activeTool === "fill-form");
   const acceptsMultiple = capability?.supportsBatch || false;
   const requiredFileCount = acceptsMultiple ? 2 : 1;
 
@@ -310,6 +315,13 @@ export function Workspace() {
           case "ocr": {
             // The original stays in FILES untouched; the searchable copy goes to Outputs like any other result.
             const outcome = await ocr.run();
+            nextResults = outcome.results;
+            doneMessage = outcome.message;
+            doneTone = outcome.tone;
+            break;
+          }
+          case "fill-form": {
+            const outcome = await formFill.run();
             nextResults = outcome.results;
             doneMessage = outcome.message;
             doneTone = outcome.tone;
@@ -459,6 +471,7 @@ export function Workspace() {
                           isPending || 
                           (!files.length && activeTool !== "blank") ||
                           (activeTool === "ocr" && !!ocr.disabledReason) ||
+                          (activeTool === "fill-form" && !!formFill.disabledReason) ||
                           activeTool === "pdf-to-word" ||
                           activeTool === "pdf-to-excel"
                         }
@@ -467,6 +480,8 @@ export function Workspace() {
                             ? "Coming soon in Phase 3 (Requires cloud processing backend)"
                             : activeTool === "ocr"
                             ? ocr.disabledReason ?? undefined
+                            : activeTool === "fill-form"
+                            ? formFill.disabledReason ?? undefined
                             : undefined
                         }
                         className={clsx(
@@ -773,6 +788,8 @@ export function Workspace() {
                 <div className="flex flex-col gap-4">
                   {activeTool === "ocr" ? (
                     <OcrFlowPanel flow={ocr} />
+                  ) : activeTool === "fill-form" ? (
+                    <FormFillPanel flow={formFill} />
                   ) : (
                     <ToolFields
                       activeTool={activeTool}

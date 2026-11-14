@@ -20,6 +20,7 @@ export type PdfToolId =
   | "extract-tables"
   | "crop"
   | "metadata"
+  | "fill-form"
   | "edit";
 
 export type ToolDescriptor = {
