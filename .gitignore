@@ -8,3 +8,11 @@ MEMORY.md
 .agent-memory/
 
 documents
+
+# Agent / planning notes kept locally, not published
+AGENTS.md
+CLAUDE.md
+ALPHA_NOTES.md
+DESIGN_STATE.md
+PROJECT_STATE.md
+.claude/
