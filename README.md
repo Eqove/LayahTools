@@ -91,7 +91,6 @@ Every tool is registered in one place, the capability registry (`pdf-tool-app/sr
 .
 ├── README.md
 ├── LOGO.png
-├── documents/                  Early implementation plan
 └── pdf-tool-app/               The Next.js application (everything runnable lives here)
     ├── src/
     │   ├── app/                Next.js App Router entry points
