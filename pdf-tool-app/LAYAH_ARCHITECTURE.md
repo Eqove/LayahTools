@@ -136,11 +136,12 @@ inside effects). Not an application defect; disable the extension (or use a priv
 
 ## External runtime dependencies
 The product promise is local processing, but these load from third parties in the browser:
-- **PDF.js worker**: `//unpkg.com/pdfjs-dist@<version>/build/pdf.worker.min.mjs`, set in 6 places
-  (`PdfViewer.tsx`, `heavy-operations.ts`, `intelligence-operations.ts` x4). Without network the viewer cannot render.
-  The version is pinned to the installed `pdfjs.version`.
+- **PDF.js worker**: `//unpkg.com/pdfjs-dist@<version>/build/pdf.worker.min.mjs`, set in 7 places
+  (`PdfViewer.tsx`, `heavy-operations.ts`, `useOcrFlow.ts` for the scanned-PDF check, `intelligence-operations.ts` x4).
+  Without network the viewer cannot render. The version is pinned to the installed `pdfjs.version`.
 - **Tesseract.js**: `createWorker("eng")` is called with defaults, which fetch the worker, core and `eng` language
-  data from a public CDN (default library behaviour; not re-verified at runtime in this audit).
+  data from a public CDN (default library behaviour). OCR was run successfully in a browser session with network
+  access during the A-3.4 check; offline behaviour has not been tested.
 - **Fonts**: `next/font/google` (Geist, Instrument Serif) is resolved at build time and self-hosted; no runtime request.
 
 No document bytes are sent to any of these.
