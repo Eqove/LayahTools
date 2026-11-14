@@ -1,5 +1,0 @@
-{
-  "typescript.tsdk": "pdf-tool-app/node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true
-}
-
