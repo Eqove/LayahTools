@@ -789,7 +789,7 @@ export function Workspace() {
   );
 }
 
-// Re-using the exact form logic from pdf-studio.tsx for stability
+// Form logic carried over from the original studio UI
 function ToolFields({
   activeTool,
   form,
