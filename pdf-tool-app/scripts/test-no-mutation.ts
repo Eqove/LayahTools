@@ -130,21 +130,21 @@ async function main() {
     await noMutation("image selection", async () => { d.down(ci.x, ci.y); await d.up(); });
     check("  ...selected the image", d.state.selectedObjectIds.join() === imageObj.id);
 
-    // paragraph/block: a point inside a block but outside every run
+    // Clicks pick a line or an image, never a multi-line block (a click beside a line used to select the whole column).
     const page = s.getPage(0);
-    let blockHit: { x: number; y: number; id: string } | null = null;
+    let probed = 0, blockHits = 0;
     for (const b of Object.values(page.layout.textBlocks)) {
-      for (let y = b.bounds.bottom + 1; y < b.bounds.top && !blockHit; y += 2) for (let x = b.bounds.left + 1; x < b.bounds.right && !blockHit; x += 3) {
+      for (let y = b.bounds.bottom + 1; y < b.bounds.top; y += 3) for (let x = b.bounds.left + 1; x < b.bounds.right; x += 4) {
         const id = hitTestPoint({ x, y }, hitCandidates(page));
-        if (id && id.startsWith("block-")) blockHit = { x, y, id };
+        probed++;
+        if (id && id.startsWith("block-")) blockHits++;
       }
-      if (blockHit) break;
     }
-    if (blockHit) {
-      const cbk = d.client(blockHit.x, blockHit.y);
-      await noMutation("paragraph (block) selection", async () => { d.down(cbk.x, cbk.y); await d.up(); });
-      check("  ...selected the block", d.state.selectedObjectIds.join() === blockHit.id);
-    } else check("paragraph (block) selection", false, "no point found that hits a block rather than a run");
+    check("a click never selects a multi-line block", probed > 0 && blockHits === 0, `${blockHits} of ${probed} probes hit a block`);
+    // Line click targets are a little bigger than the glyphs: 2pt beside a line still selects that line.
+    const someRun = Object.values(page.layout.runs)[0];
+    const nearId = hitTestPoint({ x: someRun.bounds.right + 2, y: (someRun.bounds.top + someRun.bounds.bottom) / 2 }, hitCandidates(page));
+    check("a click 2pt beside a line still selects a line", !!nearId && !!page.layout.runs[nearId]);
 
     await noMutation("select all on page", async () => { selectAllOnPage(d.machine, d.page); });
     const pg = d.page;

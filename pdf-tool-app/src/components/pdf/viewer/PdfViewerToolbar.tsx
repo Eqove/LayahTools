@@ -10,6 +10,8 @@ interface PdfViewerToolbarProps {
   onSetZoom: (zoom: number) => void;
   onPrevPage: () => void;
   onNextPage: () => void;
+  /** Optional tools shown at the start of the same row (e.g. the editor's tool buttons). */
+  start?: React.ReactNode;
 }
 
 export function PdfViewerToolbar({
@@ -21,9 +23,11 @@ export function PdfViewerToolbar({
   onSetZoom,
   onPrevPage,
   onNextPage,
+  start,
 }: PdfViewerToolbarProps) {
   return (
-    <div className="h-10 bg-white border-b border-slate-200 shadow-sm flex items-center justify-between px-4 shrink-0">
+    <div className="min-h-10 bg-white border-b border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-1 shrink-0">
+      {start && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1 basis-full sm:basis-0">{start}</div>}
       
       {/* Pagination Controls */}
       <div className="flex items-center gap-1">

@@ -17,6 +17,8 @@ interface PdfViewerProps {
   viewMode?: "scroll" | "grid";
   pageOrder?: number[];
   onPageReorder?: (newOrder: number[]) => void;
+  /** Extra controls placed at the start of the page/zoom toolbar row. */
+  toolbarStart?: React.ReactNode;
 }
 
 export function PdfViewer({ 
@@ -25,7 +27,8 @@ export function PdfViewer({
   preserveScroll = false,
   viewMode = "scroll", 
   pageOrder, 
-  onPageReorder 
+  onPageReorder,
+  toolbarStart
 }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -252,6 +255,7 @@ export function PdfViewer({
         onSetZoom={setZoom}
         onPrevPage={handlePrevPage}
         onNextPage={handleNextPage}
+        start={toolbarStart}
       />
       
       <div 

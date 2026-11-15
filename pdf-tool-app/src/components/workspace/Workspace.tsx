@@ -395,7 +395,7 @@ export function Workspace() {
             {(
               <div className="w-full h-full flex flex-col relative bg-white">
                 {/* Compact Context Header */}
-                <div className="h-12 border-b border-slate-200 px-4 md:px-6 bg-white flex justify-between items-center shrink-0">
+                <div className={clsx("h-12 border-b border-slate-200 px-4 md:px-6 bg-white flex justify-between items-center shrink-0", activeTool === "edit" && "md:hidden")}>
                   <div className="flex items-center gap-3">
                     <h2 className="text-xl font-display text-slate-900">{capability?.name}</h2>
                     <p className="text-xs text-slate-500 hidden md:block">{capability?.summary}</p>

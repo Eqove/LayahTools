@@ -144,6 +144,7 @@ export function WorkspaceHeader({ goHome, onSelectTool }: { goHome: () => void; 
             )}
           </div>
           </div>
+          <span className="hidden lg:block ml-1 pl-4 border-l border-slate-200 text-sm font-semibold text-slate-900 truncate" aria-live="polite">{CAPABILITY_REGISTRY[activeId]?.name}</span>
         </div>
 
         {/* Right: Controls */}

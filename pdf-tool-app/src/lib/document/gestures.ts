@@ -28,17 +28,33 @@ export const NOOP_MOVE_TOLERANCE_PX = 0.25;
 /** Rubber-band boxes smaller than this (PDF points) select nothing. Pre-existing value, unchanged. */
 export const MARQUEE_MIN_PT = 4;
 
-/** Everything on a page that a click can hit. Blocks lose area ties so a one-line block selects as its (editable) run. */
+/**
+ * Click targets for text lines are this much bigger than the glyphs (PDF points, each side) so a click that lands
+ * just beside or between lines still picks the nearest line instead of missing or falling through to a whole block.
+ */
+export const HIT_PAD_PT = 3;
+
+/**
+ * Everything on a page that a click can hit: text lines and images. Multi-line text blocks are deliberately NOT click
+ * targets: a click beside a line used to select the whole paragraph/column. A paragraph is selected with a drag box (it picks every line it touches).
+ */
 export function hitCandidates(page: PageView) {
   return [
-    ...Object.values(page.layout.runs).map(r => ({ id: r.id, bounds: r.bounds })),
-    ...Object.values(page.layout.textBlocks).map(b => ({
-      id: b.id,
-      bounds: b.bounds,
-      area: (b.bounds.right - b.bounds.left) * (b.bounds.top - b.bounds.bottom) * 1.001 + 0.01,
+    ...Object.values(page.layout.runs).map(r => ({
+      id: r.id,
+      bounds: { left: r.bounds.left - HIT_PAD_PT, right: r.bounds.right + HIT_PAD_PT, bottom: r.bounds.bottom - HIT_PAD_PT, top: r.bounds.top + HIT_PAD_PT },
+      area: (r.bounds.right - r.bounds.left) * (r.bounds.top - r.bounds.bottom), // unpadded: the tighter line wins where padded lines overlap
     })),
     ...Object.values(page.objects).filter(o => o.type === "image").map(o => ({ id: o.id, bounds: o.bounds })),
   ];
+}
+
+/** What a click at `pt` would select (for the hover highlight), or null. Pure read; never touches the machine. */
+export function hoverTarget(page: PageView, pt: PdfPoint): { id: string; bounds: { left: number; right: number; top: number; bottom: number } } | null {
+  const id = hitTestPoint(pt, hitCandidates(page));
+  if (!id) return null;
+  const o = page.layout.runs[id] ?? page.layout.textBlocks[id] ?? page.objects[id];
+  return o ? { id, bounds: o.bounds } : null;
 }
 
 /** Is a gesture in flight on this page? Reads the machine, not React props, so it can't be stale. */

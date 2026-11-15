@@ -3,7 +3,7 @@ import { PdfViewer } from "@/components/pdf/viewer/PdfViewer";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { EditorSession, FontCoverageError } from "@/lib/pdf/editor/session";
 import { InteractionStateMachine, LayahEditorState } from "@/lib/document/interaction";
-import { gestureDown, gestureMove, gestureUp, gestureCancel, selectAllOnPage } from "@/lib/document/gestures";
+import { gestureDown, gestureMove, gestureUp, gestureCancel, selectAllOnPage, hoverTarget } from "@/lib/document/gestures";
 import { viewportToPdfPoint, pdfToViewportBounds, PageCoordinateContext } from "@/lib/document/coordinates";
 import { downloadBytes } from "@/lib/pdf/download";
 import type { LayahObjectBounds, LayahTextObject } from "@/lib/document/types";
@@ -53,7 +53,7 @@ interface TextActions {
   style: (patch: { bold?: boolean; italic?: boolean; family?: string }) => void;
   color: (hex: string) => void;
 }
-interface SelectionActions { canEdit: boolean; isImage: boolean; edit: () => void; del: () => void; resize: (factor: number) => void; text: TextActions | null }
+interface SelectionActions { clear: () => void; canEdit: boolean; isImage: boolean; edit: () => void; del: () => void; resize: (factor: number) => void; text: TextActions | null }
 
 const stopProps = {
   onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
@@ -75,7 +75,10 @@ function SelectionBar({ actions, count, style }: { actions: SelectionActions; co
   return (
     <div {...stopProps} className="absolute z-[60] pointer-events-auto" style={style}>
       <div className="flex flex-wrap items-stretch bg-white border border-blue-400 rounded-md shadow-lg overflow-hidden">
-        {count > 1 && <span className="px-2.5 flex items-center text-xs text-slate-500 border-r border-blue-100">{count} selected</span>}
+        {count > 1 && <>
+          <span className="px-2.5 flex items-center text-xs text-slate-500 border-r border-blue-100">{count} selected</span>
+          <TB onClick={actions.clear} title="Deselect everything (Esc)" className="text-xs">Clear</TB>
+        </>}
         {actions.canEdit && <TB onClick={actions.edit} title="Edit this text (or double-click it)" className="text-xs font-medium">Edit</TB>}
         {t && <>
           <TB onClick={() => t.size(0.9)} title="Make the text smaller" aria-label="Smaller text"><span className="text-[11px] font-semibold">A</span><span className="text-[9px]">&minus;</span></TB>
@@ -109,7 +112,8 @@ function SelectionBar({ actions, count, style }: { actions: SelectionActions; co
   );
 }
 
-const FONTS = ["Helvetica", "Times-Roman", "Courier"];
+/** CSS stack that approximates a family so the on-page text box looks like the result. */
+const cssFamily = (f: string) => (f === "Times" ? '"Times New Roman", Times, serif' : f === "Courier" ? '"Courier New", Courier, monospace' : "Helvetica, Arial, sans-serif");
 const MAX_IMAGE_SIDE = 2000;
 
 const hexToRgb = (hex: string): [number, number, number] => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
@@ -146,7 +150,9 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const [placement, setPlacement] = useState<Placement>(null);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const [newText, setNewText] = useState("");
-  const [font, setFont] = useState(FONTS[0]);
+  const [font, setFont] = useState<string>(FAMILIES[0]);
+  const [nBold, setNBold] = useState(false);
+  const [nItalic, setNItalic] = useState(false);
   const [size, setSize] = useState(14);
   const [color, setColor] = useState("#000000");
   const [editing, setEditing] = useState<{ value: string; warning: string | null; needsSubstitute?: string } | null>(null);
@@ -343,6 +349,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
       return {
         bold: /bold|black|heavy/i.test(f) || (objs[0].fontWeight ?? 400) >= 600,
         italic: /italic|oblique/i.test(f),
+        fontSize: objs[0].fontSize ?? 12,
         family: /courier|mono/i.test(f) ? "Courier" : /helvetica|arial|sans/i.test(f) ? "Helvetica" : /times|serif|georgia|garamond/i.test(f) ? "Times" : "", // "" = unknown (e.g. an embedded subset font)
       };
     } catch { return null; }
@@ -389,7 +396,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const confirmNewText = () => {
     if (!placement || !newText.trim()) return;
     const { pageIndex, x, y } = placement;
-    run("Adding text…", s => s.addText(pageIndex, { text: newText, x, y: y - size, fontSize: size, fontFamily: font, color: hexToRgb(color) }), pageIndex, "Text added")
+    run("Adding text…", s => s.addText(pageIndex, { text: newText, x, y: y - size, fontSize: size, fontFamily: fontName(font, nBold, nItalic), color: hexToRgb(color) }), pageIndex, "Text added")
       .then(() => { setPlacement(null); setNewText(""); setTool("select"); });
   };
 
@@ -406,7 +413,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
 
   const btn = "px-3 py-1.5 rounded-md text-sm font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
   const input = "border border-slate-200 rounded-md px-2 py-1.5 text-sm bg-white";
-  const seg = (active: boolean) => `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-r border-slate-200 last:border-r-0 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${active ? "bg-blue-50 text-blue-700" : "bg-white text-slate-700 hover:bg-slate-50"}`;
+  const seg = (active: boolean) => `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-r border-slate-200 last:border-r-0 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${active ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`;
   const textRunOnly = !!singleRun;
   const modes: [Tool, string, string][] = [
     ["select", "Select", "Select, move and edit what is already on the page"],
@@ -423,16 +430,19 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const hint = tool === "image" && pendingImage ? `Click on the page to place "${pendingImage.name}".` : HINTS[tool];
   const cancelImage = tool === "image" && pendingImage;
 
-  const editUi = editing && (
+  // Inline editing: the text box sits on the page at the real (zoom-scaled) size, like the final result.
+  const editUi = editing ? (zoom: number) => (
     <div className="w-full">
-      <input autoFocus className={`${input} w-full shadow-lg ring-2 ring-blue-300`} value={editing.value} aria-label="New text"
+      <input autoFocus onFocus={e => e.target.select()} value={editing.value} aria-label="New text"
+        style={{ fontSize: (textInfo?.fontSize ?? 12) * zoom, lineHeight: 1.15, fontFamily: cssFamily(textInfo?.family ?? ""), fontWeight: textInfo?.bold ? 700 : 400, fontStyle: textInfo?.italic ? "italic" : "normal" }}
+        className="w-full bg-white border border-dashed border-blue-500 outline-none px-0.5 shadow select-text"
         onChange={e => setEditing({ ...editing, value: e.target.value, needsSubstitute: undefined })}
         onKeyDown={e => { if (e.key === "Enter") applyEdit(); else if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
       <div className="mt-1 flex flex-wrap items-center gap-1.5 bg-white border border-slate-200 rounded-md shadow-lg p-1.5">
-        <button className={`${btn} bg-blue-600 text-white border-blue-600 hover:bg-blue-700`} disabled={!!busy} onClick={() => applyEdit()}>Apply</button>
+        <button className={`${btn} bg-blue-600 text-white border-blue-600 hover:bg-blue-700`} disabled={!!busy} onClick={() => applyEdit()}>Done</button>
         {editing.needsSubstitute && <button className={`${btn} bg-white border-amber-400 text-amber-900`} disabled={!!busy} onClick={() => applyEdit(true)}>Use Helvetica instead</button>}
         <button className={`${btn} bg-white border-slate-200`} onClick={() => setEditing(null)}>Cancel</button>
-        <span className="text-xs text-slate-500 px-1">Enter to apply · Esc to cancel</span>
+        <span className="text-xs text-slate-500 px-1">Type your change · Enter = done · Esc = cancel</span>
       </div>
       {(editing.needsSubstitute || editing.warning) && (
         <p className="mt-1 max-w-sm rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs p-2 shadow">
@@ -440,49 +450,59 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
         </p>
       )}
     </div>
-  );
+  ) : null;
 
-  const placeUi = tool === "text" && placement && (
-    <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-2 w-[min(25rem,calc(100vw-2rem))] flex flex-col gap-2">
-      <input ref={newTextInput} className={`${input} w-full`} value={newText} placeholder="Type your text…" aria-label="New text"
+  // New text: type straight onto the page; the bar above holds font, size, bold/italic and colour.
+  const placeUi = tool === "text" && placement ? (zoom: number) => ({
+    input: (
+      <input ref={newTextInput} value={newText} placeholder="Type your text" aria-label="New text"
+        style={{ fontSize: size * zoom, lineHeight: 1.15, fontFamily: cssFamily(font), fontWeight: nBold ? 700 : 400, fontStyle: nItalic ? "italic" : "normal", color, width: `${Math.max(10, newText.length + 3)}ch` }}
+        className="bg-white/90 border border-dashed border-blue-500 outline-none px-0.5 min-w-[8rem] max-w-[80vw] shadow"
         onChange={e => setNewText(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") confirmNewText(); else if (e.key === "Escape") { e.stopPropagation(); setPlacement(null); } }} />
-      <div className="flex items-center gap-2">
-        <select className={`${input} min-w-0 flex-1`} value={font} onChange={e => setFont(e.target.value)} aria-label="Font">{FONTS.map(f => <option key={f}>{f}</option>)}</select>
-        <input className={`${input} w-16`} type="number" min={4} max={200} value={size} onChange={e => setSize(Math.max(4, Math.min(200, Number(e.target.value) || 12)))} aria-label="Font size" />
-        <input type="color" value={color} onChange={e => setColor(e.target.value)} aria-label="Colour" className="h-8 w-9 shrink-0 border border-slate-200 rounded" />
+    ),
+    bar: (
+      <div className="flex items-stretch bg-white border border-blue-400 rounded-md shadow-lg overflow-hidden whitespace-nowrap"
+        onMouseDown={e => { if (!(e.target as HTMLElement).closest("select,input")) e.preventDefault(); /* buttons must not steal focus from the text box */ }}>
+        <select value={font} onChange={e => setFont(e.target.value)} aria-label="Font" className="h-8 text-xs text-blue-600 bg-white border-r border-blue-100 px-1.5 focus:outline-none">{FAMILIES.map(f => <option key={f}>{f}</option>)}</select>
+        <TB onClick={() => setSize(s => Math.max(4, s - 1))} title="Smaller text" aria-label="Smaller text"><span className="text-[11px] font-semibold">A</span><span className="text-[9px]">&minus;</span></TB>
+        <input type="number" min={4} max={200} value={size} aria-label="Font size" onChange={e => setSize(Math.max(4, Math.min(200, Number(e.target.value) || 12)))} className="h-8 w-12 text-sm text-center border-r border-blue-100 focus:outline-none" />
+        <TB onClick={() => setSize(s => Math.min(200, s + 1))} title="Larger text" aria-label="Larger text"><span className="text-base font-semibold leading-none">A</span><span className="text-[9px]">+</span></TB>
+        <TB active={nBold} onClick={() => setNBold(b => !b)} title="Bold" aria-pressed={nBold} className="font-bold">B</TB>
+        <TB active={nItalic} onClick={() => setNItalic(i => !i)} title="Italic" aria-pressed={nItalic} className="italic">I</TB>
+        <input type="color" value={color} onChange={e => setColor(e.target.value)} aria-label="Text colour" title="Text colour" className="h-8 w-9 p-1 border-r border-blue-100 bg-white cursor-pointer" />
+        <button type="button" className="px-3 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40" disabled={!newText.trim() || !!busy} onClick={confirmNewText} title="Add text (Enter)">Add</button>
+        <TB onClick={() => setPlacement(null)} title="Cancel (Esc)" aria-label="Cancel" className="text-slate-500">&#10005;</TB>
       </div>
-      <div className="flex items-center justify-end gap-2">
-        <span className="mr-auto text-xs text-slate-500">Enter to add · Esc to cancel</span>
-        <button className={`${btn} bg-white border-slate-200`} onClick={() => setPlacement(null)}>Cancel</button>
-        <button className={`${btn} bg-blue-600 text-white border-blue-600 hover:bg-blue-700`} disabled={!newText.trim() || !!busy} onClick={confirmNewText}>Add</button>
+    ),
+  }) : null;
+
+  // Tools live in the viewer's page/zoom row, so the editor needs only one toolbar row.
+  const toolbarStart = (
+    <>
+      <div className="inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden" role="toolbar" aria-label="Edit tools" title={HINTS.select}>
+        {modes.map(([t, label, tip]) => (
+          <button key={t} className={seg(tool === t)} disabled={!!busy} title={tip} aria-pressed={tool === t} onClick={() => pickMode(t)}>
+            <Icon name={t} /><span className="hidden sm:inline">{label}</span>
+          </button>
+        ))}
       </div>
-    </div>
+      <div className="inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden">
+        <button className={seg(false)} disabled={!!busy || !session.canUndo} onClick={undo} title="Undo (Ctrl+Z)"><Icon name="undo" /><span className="hidden sm:inline">Undo</span></button>
+        <button className={seg(false)} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /><span className="hidden sm:inline">Redo</span></button>
+      </div>
+      <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => onPickImage(e.target.files?.[0])} />
+      {busy ? <span className="text-sm text-slate-500 animate-pulse" role="status">{busy}</span> : (tool !== "select" || cancelImage) && (
+        <span className="text-xs text-slate-500 min-w-0 truncate" title={hint}>
+          {hint}
+          {cancelImage && <button className="underline ml-2" onClick={() => { setPendingImage(null); setTool("select"); }}>Cancel</button>}
+        </span>
+      )}
+    </>
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="bg-white border-b border-slate-200 px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 shrink-0">
-        <div className="inline-flex border border-slate-200 rounded-md overflow-hidden" role="toolbar" aria-label="Edit tools">
-          {modes.map(([t, label, tip]) => (
-            <button key={t} className={seg(tool === t)} disabled={!!busy} title={tip} aria-pressed={tool === t} onClick={() => pickMode(t)}>
-              <Icon name={t} /><span className="hidden sm:inline">{label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="inline-flex border border-slate-200 rounded-md overflow-hidden">
-          <button className={seg(false)} disabled={!!busy || !session.canUndo} onClick={undo} title="Undo (Ctrl+Z)"><Icon name="undo" /><span className="hidden sm:inline">Undo</span></button>
-          <button className={seg(false)} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /><span className="hidden sm:inline">Redo</span></button>
-        </div>
-        <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => onPickImage(e.target.files?.[0])} />
-        {busy ? <span className="text-sm text-slate-500 animate-pulse" role="status">{busy}</span> : (
-          <span className="text-xs text-slate-500 min-w-0 basis-full sm:basis-0 sm:flex-1 truncate" title={hint}>
-            {hint}
-            {cancelImage && <button className="underline ml-2" onClick={() => { setPendingImage(null); setTool("select"); }}>Cancel</button>}
-          </span>
-        )}
-      </div>
-
+    <div className="flex flex-col h-full min-h-0 select-none">
       <div className="flex-1 min-h-0 relative">
         {error && (
           <div role="alert" className="absolute top-0 inset-x-0 z-[60] bg-red-50 border-b border-red-200 text-red-800 px-4 py-2 text-sm flex items-start justify-between gap-4 shadow">
@@ -494,6 +514,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
           file={viewerFile}
           viewMode="scroll"
           preserveScroll
+          toolbarStart={toolbarStart}
           renderPageOverlay={pageIndex => (
             <EditorPageOverlay
               key={pageIndex}
@@ -509,9 +530,9 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
               onPlace={place}
               onWhiteout={whiteout}
               onMove={(p, ids, dx, dy) => run("Moving…", s => s.move(p, ids, dx, dy), p, "Moved")}
-              actions={{ canEdit: textRunOnly, isImage: singleObj?.type === "image", edit: startEdit, del: deleteSelection, resize: resizeSelection, text: textActions }}
-              editUi={editUi || null}
-              placeUi={placeUi || null}
+              actions={{ clear: () => { machine.reset(); sync(); }, canEdit: textRunOnly, isImage: singleObj?.type === "image", edit: startEdit, del: deleteSelection, resize: resizeSelection, text: textActions }}
+              editUi={editUi}
+              placeUi={placeUi}
             />
           )}
         />
@@ -555,12 +576,13 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   onWhiteout: (pageIndex: number, r: { x: number; y: number; width: number; height: number }) => void;
   onMove: (pageIndex: number, ids: string[], dx: number, dy: number) => void;
   actions: SelectionActions;
-  editUi: React.ReactNode;
-  placeUi: React.ReactNode;
+  editUi: ((zoom: number) => React.ReactNode) | null;
+  placeUi: ((zoom: number) => { input: React.ReactNode; bar: React.ReactNode }) | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useElementSize(ref);
   const [wo, setWo] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  const [hover, setHover] = useState<{ id: string; bounds: { left: number; right: number; top: number; bottom: number } } | null>(null);
   void rev;
   const page = pageOf(session, pageIndex);
   if (!page) return null;
@@ -592,6 +614,11 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (wo) { setWo({ ...wo, b: toPdf(e) }); return; }
+    // Hover highlight: shows what a click would select (select tool, nothing being dragged).
+    if (tool === "select" && !disabled && editorState.phase === "idle" && e.pointerType === "mouse") {
+      const h = hoverTarget(page, toPdf(e));
+      if ((h?.id ?? null) !== (hover?.id ?? null)) setHover(h);
+    } else if (hover) setHover(null);
     if (gestureMove(machine, pageIndex, toPdf(e), ctx.zoom)) sync();
   };
   const onPointerUp = (e: React.PointerEvent) => {
@@ -671,7 +698,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         tool === "select"
           ? editorState.phase === "dragging"
             ? "cursor-grabbing"
-            : "cursor-default"
+            : hover ? (editorState.selectedObjectIds.includes(hover.id) ? "cursor-move" : "cursor-pointer") : "cursor-default"
           : "cursor-crosshair"
       }`}
       onPointerDown={onPointerDown}
@@ -679,6 +706,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerAbort}
       onLostPointerCapture={onPointerAbort}
+      onPointerLeave={() => { if (hover) setHover(null); }}
       onDoubleClick={() => { if (tool === "select" && !disabled && actions.canEdit && mine) actions.edit(); }}
     >
       <SelectionOverlay
@@ -686,6 +714,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         groupSelectionBounds={group}
         phase={editorState.phase}
         selectionBox={box}
+        hoverBounds={hover && !editorState.selectedObjectIds.includes(hover.id) ? pdfToViewportBounds(hover.bounds, ctx) : null}
         dragDeltaPt={dragPt}
       />
       {marker && <div className="absolute bg-blue-600 pointer-events-none" style={{ left: marker.left, top: marker.top, width: 2, height: marker.bottom - marker.top }} />}
@@ -705,15 +734,20 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
               style={{ left: clampLeft(anchor.left, Math.min(size.width, 330)), maxWidth: Math.max(size.width, 220), ...(anchor.top < 60 ? { top: anchor.bottom + 6 } : { top: anchor.top - 6, transform: "translateY(-100%)" }) }} />
           )}
           {editUi && selectedBounds.length === 1 && (
-            <div {...stop} className="absolute z-[60] pointer-events-auto" style={{ left: clampLeft(selectedBounds[0].bounds.left - 4, 260), top: Math.max(2, selectedBounds[0].bounds.top - 4), width: Math.max(selectedBounds[0].bounds.right - selectedBounds[0].bounds.left + 24, 260) }}>
-              {editUi}
+            <div {...stop} className="absolute z-[60] pointer-events-auto" style={{ left: clampLeft(selectedBounds[0].bounds.left - 2, 280), top: Math.max(0, selectedBounds[0].bounds.top - 3), width: Math.max((selectedBounds[0].bounds.right - selectedBounds[0].bounds.left) * 1.2 + 32, 280) }}>
+              {editUi(ctx.zoom)}
             </div>
           )}
-          {placeUi && marker && (
-            <div {...stop} className="absolute z-[60] pointer-events-auto" style={{ left: clampLeft(marker.left, 400), top: marker.bottom + 6 }}>
-              {placeUi}
-            </div>
-          )}
+          {placeUi && marker && (() => {
+            const p = placeUi(ctx.zoom);
+            const shift = Math.max(0, marker.left + 420 - size.width); // keep the bar inside the page when clicking near the right edge
+            return (
+              <div {...stop} className="absolute z-[60] pointer-events-auto" style={{ left: marker.left, top: marker.top }}>
+                {p.input}
+                <div className="absolute" style={{ left: -shift, ...(marker.top < 56 ? { top: "100%", marginTop: 6 } : { bottom: "100%", marginBottom: 6 }) }}>{p.bar}</div>
+              </div>
+            );
+          })()}
         </>;
       })()}
     </div>

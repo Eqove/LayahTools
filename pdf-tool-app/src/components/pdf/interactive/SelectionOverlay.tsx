@@ -54,7 +54,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
       {/* 1. Hover highlight (idle only) */}
       {hoverBounds && phase === "idle" && (
         <div
-          className="absolute border border-blue-300 bg-blue-100 bg-opacity-20 pointer-events-none"
+          className="absolute border border-blue-400 bg-blue-100/40 pointer-events-none rounded-[1px]"
           style={{
             left: hoverBounds.left,
             top: hoverBounds.top,
