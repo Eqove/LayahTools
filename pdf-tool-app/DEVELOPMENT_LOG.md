@@ -257,3 +257,8 @@ no browser run, no exhaustive mutation testing.
 - `scripts/test-annotation-matrix.ts` runs 23 operations on 2 annotation fixtures (15 annotation kinds): 214 PASS, 131 PARTIAL, 0 FAIL, pinned by `KNOWN`. Results in `ANNOTATION_PRESERVATION_MATRIX.md`.
 - Open issue: pdf-lib `copyPages` (merge, insert, split, extract, rearrange, compress, unlock) leaves annotation `/P` and GoTo targets on orphan page objects and drops `/AcroForm`. Deferred; see `ALPHA_PHASE4_REPORT.md` section 10.
 - `inspectAnnotations` now also reads author, opacity, border width, modified date, decoded appearance digest, page link, GoTo target and AcroForm reach.
+
+## Alpha Phase 4 final validation
+- `npm test` run as one command: exit 0, all 17 scripts passed (858 + 477 matrix checks), tracked tree clean afterwards.
+- Browser (Playwright Chromium, dev server): Fill Form wrote and verified one text field; Flatten ran with confirmation; downloaded output reopens with 0 fields, 0 annotations. Chrome/Edge PDF viewers and non-text field types were not exercised.
+- `copyPages` issue (orphan `/P` and GoTo targets, dropped `/AcroForm`; 131 PARTIAL cells) stays deferred; root cause, impact and recommended fix are in `ALPHA_PHASE4_REPORT.md` ("Final validation addendum").

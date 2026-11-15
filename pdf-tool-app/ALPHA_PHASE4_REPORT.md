@@ -19,7 +19,8 @@ border, opacity, author, date or appearance. Every non-PASS cell comes from two 
 
 Both are recorded and **deferred**, not fixed (section 10). No production behaviour was changed to make a test pass.
 
-Not verified in this pass: the Fill Form and Flatten panels in a real browser, and human checks of flattened output in Chrome/Edge.
+Final validation (see "Final validation addendum" at the end): the single `npm test` command exited 0, and the Fill Form and Flatten
+panels were driven once in a real browser (Playwright Chromium). Chrome's and Edge's built-in PDF viewers were **not** exercised.
 
 ## 2. Phase 4 Objectives
 Trustworthy output: a regression report that separates affected from unaffected pages, AcroForm filling, form flattening, and
@@ -114,8 +115,8 @@ Each script run individually with `npx tsx`; every exit code 0.
 | test-annotation-matrix (A-4.4 matrix) | 477 (only the final total is printed) | 0 |
 | **Total** | **858 + 477 = 1335** | **0** |
 
-I ran the 17 scripts of the `npm test` chain individually and tallied `PASS` lines. I did not run the single `npm test` command end to
-end. The matrix script was added to that chain in `package.json`. The matrix total counts every one of its 345 cells plus pinned-entry checks.
+I first ran the 17 scripts of the `npm test` chain individually and tallied `PASS` lines. The single `npm test` command was then run end
+to end in the final validation (addendum): exit code 0. The matrix script was added to that chain in `package.json`. The matrix total counts every one of its 345 cells plus pinned-entry checks.
 Other diagnostics in `scripts/` that are not in `npm test` (for example `test-document-model`, `test-pdfium-engine`) were not run.
 
 ## 9. Production Build Results
@@ -153,7 +154,8 @@ ESLint on the four files touched in this close-out (`annotations.ts`, `test-anno
 
 ## 12. Remaining Issues
 - Fix items 1 and 2 of section 10 (shared post-`copyPages` repair) in a later phase; change the pinned `KNOWN` cells with it.
-- Human browser pass for the Fill Form and Flatten panels, and opening flattened output in Chrome/Edge: Unverified here.
+- Opening flattened output in the Chrome and Edge built-in PDF viewers, and a human pass over the remaining panel interactions
+  (checkbox, radio, dropdown, list fields): Unverified (see addendum).
 - FILES drag-and-drop reorder (A-1.1) remains open until a human tests it (existing project rule).
 - External CDN dependencies unchanged (PDF.js worker on unpkg, Tesseract assets).
 
@@ -169,12 +171,51 @@ Files in the close-out: `src/lib/pdf/annotations.ts`, `scripts/test-annotation-m
 | Item | Implemented | Tested | Notes |
 |---|---|---|---|
 | A-4.1 Regression harness | Yes | Yes (22 + regression section) | |
-| A-4.2 Form filling | Yes | Yes (67) | UI not re-verified in a browser |
-| A-4.3 Flattening | Yes | Yes (34) | UI not re-verified in a browser |
+| A-4.2 Form filling | Yes | Yes (67) | UI smoke-tested once in Chromium (text field only) |
+| A-4.3 Flattening | Yes | Yes (34) | UI smoke-tested once in Chromium; Chrome/Edge viewers unverified |
 | A-4.4 Annotation inspector | Yes | Yes (50) | |
 | A-4.4 Preservation matrix | Yes | Yes (477) | 214 PASS, 131 PARTIAL, 0 FAIL |
 | A-4.5 Final report | Yes | n/a | this document |
 | Production build | Yes | Passed | |
 
 **Phase 4 code and tests are complete and verified by automated runs. Closed with open items:** the PARTIAL results in the matrix are
-real, understood and deferred (section 10), and the browser pass for the two new panels was not done in this session.
+real, understood and deferred (section 10), and the remaining validation gaps are listed in the addendum below.
+
+## Final validation addendum
+Run on branch `alpha-phase4` at `31fdcc1`, tree clean before and after.
+
+**Full test run.** `npm test` (one command): exit code 0. Every one of the 17 scripts in the chain printed its pass banner, ending
+with `ALL 477 MATRIX CHECKS PASSED`. No failure lines apart from the matrix's own `PARTIAL` rows. `git status` was clean afterwards, so
+no test modified a tracked fixture. Per-script counts are those in section 8 (858 + 477).
+
+**Browser validation (Playwright Chromium against `npm run dev`, one session).**
+- Fill Form panel: uploaded `form-all-fields.pdf`; the panel listed the fields ("10 fields, 2 cannot be filled"). Typed a value into
+  `t.name` and ran the tool. Result: "Form filled: 1 field written and verified after reopening. 2 unsupported fields were left as
+  is." `form-all-fields-filled.pdf` appeared in Outputs and the original stayed in FILES. Not exercised in the browser: checkbox,
+  radio, dropdown, list and multiline fields.
+- Flatten panel: for the same file it showed the field count, a notice that `s.signature` has no visible appearance and is removed, the
+  irreversibility warning and a confirmation checkbox. After confirming and running: "Flattened 10 fields; checks on the reopened copy"
+  and `form-all-fields-flattened.pdf` in Outputs.
+- Downloaded file integrity: downloaded the flattened output via the Download button (11,258 bytes, `%PDF-1.7` header). Reopened with
+  pdf-lib: 1 page, 0 form fields, 0 annotations. No console errors during the run (4 pre-existing warnings).
+- **Not performed:** viewing the flattened PDF in the Chrome or Edge built-in PDF viewer (the automated browser does not provide it),
+  and any visual comparison of the flattened page in a human-operated browser. Flattened rendering is covered only by the A-4.3
+  automated tests (PDF.js render comparison), not by browser viewers.
+
+**Documentation review.** `ALPHA_PHASE4_REPORT.md`, `ANNOTATION_PRESERVATION_MATRIX.md` and `DEVELOPMENT_LOG.md` agree on: 345 cells,
+214 PASS / 131 PARTIAL / 0 FAIL, 858 + 477 checks, build and lint status, and the two deferred issues.
+
+**`copyPages` issue, kept visible for the next phase.**
+- Root cause: pdf-lib `PDFDocument.copyPages` copies a page's annotations by reference graph, which pulls in the source page object
+  (via `/P` and GoTo `/Dest`) as an extra `/Page` outside the output's page tree, and it never copies `/AcroForm`.
+- Affected: merge, insert (merge with a blank page), split, extract (all and single), rearrange, compress, unlock.
+- Annotations: present and rendering, but `/P` points at an orphan page, and the file carries duplicate orphan pages.
+- Internal links: GoTo targets resolve to the orphan, not the output page; the link goes nowhere (viewer behaviour not exercised).
+- AcroForm widgets: remain annotations but are no longer reachable from `/AcroForm`, so they are not interactive form fields.
+- Recommended fix: one shared post-copy step: rewrite `/P` to the new page, remap GoTo `Dest` through the old-to-new page map,
+  remove the orphan `/Page` objects, and copy the `/AcroForm` field tree (rebuilding `/Fields`, `/DA`, `/DR`). Apply at the 8 call
+  sites, add a regression test, then update the pinned `KNOWN` cells in `test-annotation-matrix.ts`. Not done in Phase 4 by decision.
+
+**Decision.** Phase 4 is complete as "closed with open items": all implementation and documentation work is finished, automated
+tests and the build pass, and the gaps are explicit: Chrome/Edge viewer rendering, browser coverage of non-text field types, the 131
+deferred PARTIAL cells, and the redaction limitation. Alpha Phase 5 was not started.
