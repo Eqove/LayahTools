@@ -5,7 +5,7 @@ export interface SelectedObjectItem {
   id: string;
   bounds: ViewportBounds;
   text?: string;
-  type?: "text" | "image" | "rect" | "other";
+  type?: "text" | "image" | "rect" | "shape" | "other";
 }
 
 export interface SelectionOverlayProps {
@@ -71,7 +71,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
           className={`absolute pointer-events-none overflow-hidden transition-none ${
             isDragging
               ? "border-2 border-blue-600 border-dashed bg-white/85 shadow-lg rounded-sm"
-              : "border border-blue-500 bg-blue-200/30"
+              : type === "shape" ? "border border-dashed border-blue-400" : "border border-blue-500 bg-blue-200/30"
           }`}
           style={{
             left: bounds.left,

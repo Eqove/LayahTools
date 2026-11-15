@@ -27,7 +27,7 @@ export type LayahObjectId = string;
 
 import { LayahTextRun } from "./runs";
 import { LayahTextBlock } from "./blocks";
-export type LayahObjectType = "text" | "image" | "path" | "unknown";
+export type LayahObjectType = "text" | "image" | "shape" | "path" | "unknown";
 
 export interface LayahProvenance {
   kind: "source" | "created";
@@ -59,6 +59,18 @@ export interface LayahImageObject extends LayahSourceBaseObject {
   type: "image";
 }
 
+/** A shape drawn by this editor (rectangle, ellipse, line, arrow). Editable: move, resize, restyle. */
+export interface LayahShapeObject extends LayahSourceBaseObject {
+  type: "shape";
+  shape: {
+    kind: "rect" | "ellipse" | "line" | "arrow";
+    x1: number; y1: number; x2: number; y2: number;
+    strokeWidth: number;
+    stroke: [number, number, number];
+    fill?: [number, number, number];
+  };
+}
+
 export interface LayahPathObject extends LayahSourceBaseObject {
   type: "path";
 }
@@ -71,6 +83,7 @@ export interface LayahUnknownObject extends LayahSourceBaseObject {
 export type LayahSourceObject =
   | LayahTextObject
   | LayahImageObject
+  | LayahShapeObject
   | LayahPathObject
   | LayahUnknownObject;
 

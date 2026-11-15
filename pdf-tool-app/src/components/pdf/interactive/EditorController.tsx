@@ -6,14 +6,21 @@ import { InteractionStateMachine, LayahEditorState } from "@/lib/document/intera
 import { gestureDown, gestureMove, gestureUp, gestureCancel, selectAllOnPage, hoverTarget } from "@/lib/document/gestures";
 import { viewportToPdfPoint, pdfToViewportBounds, PageCoordinateContext } from "@/lib/document/coordinates";
 import { downloadBytes } from "@/lib/pdf/download";
-import type { LayahObjectBounds, LayahTextObject } from "@/lib/document/types";
+import type { LayahObjectBounds, LayahShapeObject, LayahTextObject } from "@/lib/document/types";
 
 interface EditorControllerProps {
   file: File;
   onFileModified: (file: File) => void;
 }
 
-type Tool = "select" | "text" | "image" | "whiteout" | "rect";
+type Tool = "select" | "text" | "image" | "whiteout" | "shape";
+type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
+const SHAPES: { id: ShapeKind; label: string }[] = [
+  { id: "rect", label: "Rectangle" },
+  { id: "ellipse", label: "Ellipse" },
+  { id: "line", label: "Line" },
+  { id: "arrow", label: "Arrow" },
+];
 type Placement = { pageIndex: number; x: number; y: number } | null;
 interface PendingImage { rgba: Uint8ClampedArray; pw: number; ph: number; name: string }
 
@@ -23,6 +30,12 @@ const ICONS: Record<string, string> = {
   image: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z",
   whiteout: "M7 21h10M5.5 13.5l7-7a2 2 0 012.8 0l3.2 3.2a2 2 0 010 2.8l-6 6H9l-3.5-3.5a2 2 0 010-1.5z",
   rect: "M4 6h16v12H4z",
+  ellipse: "M12 5c4.4 0 8 3.1 8 7s-3.6 7-8 7-8-3.1-8-7 3.6-7 8-7z",
+  line: "M5 19L19 5",
+  arrow: "M5 19L19 5M10 5h9v9",
+  chevron: "M6 9l6 6 6-6",
+  copy: "M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2",
+  fill: "M4 6h16v12H4zM8 10h8v4H8z",
   undo: "M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6",
   redo: "M21 10H11a8 8 0 00-8 8v2m18-10l-6 6m6-6l-6-6",
   palette: "M12 3a9 9 0 100 18 2 2 0 002-2c0-1-1-1.5-1-2.5s1-1.5 2-1.5h2a3 3 0 003-3C20 7 16.5 3 12 3zM7.5 12h.01M9 8h.01M13 7h.01M16.5 9.5h.01",
@@ -36,7 +49,7 @@ const HINTS: Record<Tool, string> = {
   text: "Click on the page where the text should go.",
   image: "Click on the page to place your image.",
   whiteout: "Drag a box over what you want to cover. This only covers it visually; to remove sensitive text, use Redact PDF.",
-  rect: "Click on the page to place an outline rectangle. It can be undone, but not selected afterwards.",
+  shape: "Drag on the page to draw, or just click for a standard-size shape. Click a shape afterwards to resize, recolour, move or delete it.",
 };
 const SWATCHES = ["#000000", "#4b5563", "#dc2626", "#ea580c", "#16a34a", "#2563eb", "#9333ea", "#ffffff"];
 const FAMILIES = ["Helvetica", "Times", "Courier"] as const;
@@ -53,7 +66,16 @@ interface TextActions {
   style: (patch: { bold?: boolean; italic?: boolean; family?: string }) => void;
   color: (hex: string) => void;
 }
-interface SelectionActions { clear: () => void; canEdit: boolean; isImage: boolean; edit: () => void; del: () => void; resize: (factor: number) => void; text: TextActions | null }
+interface ShapeActions {
+  kind: ShapeKind;
+  closed: boolean;
+  width: number;
+  setWidth: (w: number) => void;
+  setStroke: (hex: string) => void;
+  setFill: (hex: string | null) => void;
+  duplicate: () => void;
+}
+interface SelectionActions { shape: ShapeActions | null; clear: () => void; canEdit: boolean; isImage: boolean; edit: () => void; del: () => void; resize: (factor: number) => void; text: TextActions | null }
 
 const stopProps = {
   onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
@@ -68,10 +90,28 @@ function TB({ active, danger, className = "", ...p }: React.ButtonHTMLAttributes
   );
 }
 
+/** Colour swatches (optionally with a "no fill" choice). */
+function Swatches({ onPick, none }: { onPick: (hex: string | null) => void; none?: boolean }) {
+  return (
+    <div className="mt-1 inline-flex gap-1.5 bg-white border border-slate-200 rounded-md shadow-lg p-1.5">
+      {none && (
+        <button type="button" aria-label="No fill" title="No fill" onClick={() => onPick(null)} className="w-6 h-6 rounded-full border border-slate-300 bg-white overflow-hidden">
+          <svg viewBox="0 0 24 24" className="w-full h-full"><path d="M4 20L20 4" stroke="#dc2626" strokeWidth="2" /></svg>
+        </button>
+      )}
+      {SWATCHES.map(c => (
+        <button key={c} type="button" aria-label={`Colour ${c}`} onClick={() => onPick(c)} className="w-6 h-6 rounded-full border border-slate-300" style={{ background: c }} />
+      ))}
+    </div>
+  );
+}
+
 /** Floating bar above the selection: only controls that work for what is selected. */
 function SelectionBar({ actions, count, style }: { actions: SelectionActions; count: number; style: React.CSSProperties }) {
-  const [palette, setPalette] = useState(false);
+  const [palette, setPalette] = useState<"text" | "stroke" | "fill" | null>(null);
+  const toggle = (p: "text" | "stroke" | "fill") => setPalette(cur => (cur === p ? null : p));
   const t = actions.text;
+  const sh = actions.shape;
   return (
     <div {...stopProps} className="absolute z-[60] pointer-events-auto" style={style}>
       <div className="flex flex-wrap items-stretch bg-white border border-blue-400 rounded-md shadow-lg overflow-hidden">
@@ -90,9 +130,21 @@ function SelectionBar({ actions, count, style }: { actions: SelectionActions; co
             {!t.family && <option value="" disabled>Font</option>}
             {FAMILIES.map(f => <option key={f}>{f}</option>)}
           </select>
-          <TB onClick={() => setPalette(p => !p)} title="Text colour" aria-label="Text colour" aria-expanded={palette} active={palette}>
+          <TB onClick={() => toggle("text")} title="Text colour" aria-label="Text colour" aria-expanded={palette === "text"} active={palette === "text"}>
             <Icon name="palette" />
           </TB>
+        </>}
+        {sh && <>
+          <select value={sh.width} onChange={e => sh.setWidth(Number(e.target.value))} aria-label="Line thickness" title="Line thickness"
+            className="h-8 text-xs text-blue-600 bg-white border-r border-blue-100 px-1.5 focus:outline-none">
+            {![1, 2, 4, 8].includes(sh.width) && <option value={sh.width}>{Math.round(sh.width * 10) / 10} pt</option>}
+            <option value={1}>Thin</option><option value={2}>Medium</option><option value={4}>Thick</option><option value={8}>Extra thick</option>
+          </select>
+          {sh.closed && (
+            <TB onClick={() => toggle("fill")} title="Fill colour" aria-label="Fill colour" aria-expanded={palette === "fill"} active={palette === "fill"}><Icon name="fill" /></TB>
+          )}
+          <TB onClick={() => toggle("stroke")} title="Outline colour" aria-label="Outline colour" aria-expanded={palette === "stroke"} active={palette === "stroke"}><Icon name="palette" /></TB>
+          <TB onClick={sh.duplicate} title="Duplicate" aria-label="Duplicate"><Icon name="copy" /></TB>
         </>}
         {actions.isImage && <>
           <TB onClick={() => actions.resize(0.9)} title="Make the image 10% smaller" className="text-xs">Smaller</TB>
@@ -100,16 +152,24 @@ function SelectionBar({ actions, count, style }: { actions: SelectionActions; co
         </>}
         <TB danger onClick={actions.del} title="Delete (Del)" aria-label="Delete"><Icon name="trash" /></TB>
       </div>
-      {t && palette && (
-        <div className="mt-1 inline-flex gap-1.5 bg-white border border-slate-200 rounded-md shadow-lg p-1.5">
-          {SWATCHES.map(c => (
-            <button key={c} type="button" aria-label={`Colour ${c}`} onClick={() => { t.color(c); setPalette(false); }}
-              className="w-6 h-6 rounded-full border border-slate-300" style={{ background: c }} />
-          ))}
-        </div>
-      )}
+      {t && palette === "text" && <Swatches onPick={c => { if (c) t.color(c); setPalette(null); }} />}
+      {sh && palette === "stroke" && <Swatches onPick={c => { if (c) sh.setStroke(c); setPalette(null); }} />}
+      {sh && palette === "fill" && <Swatches none onPick={c => { sh.setFill(c); setPalette(null); }} />}
     </div>
   );
+}
+
+/** New geometry when a resize handle is dragged to `pt` (PDF points). Rect/ellipse handles move edges; line/arrow handles move an end. */
+function dragHandle(sh: { kind: string; x1: number; y1: number; x2: number; y2: number }, handle: string, pt: { x: number; y: number }) {
+  if (sh.kind === "line" || sh.kind === "arrow") {
+    return handle === "p1" ? { x1: pt.x, y1: pt.y, x2: sh.x2, y2: sh.y2 } : { x1: sh.x1, y1: sh.y1, x2: pt.x, y2: pt.y };
+  }
+  let L = Math.min(sh.x1, sh.x2), R = Math.max(sh.x1, sh.x2), B = Math.min(sh.y1, sh.y2), T = Math.max(sh.y1, sh.y2);
+  if (handle.includes("w")) L = pt.x;
+  if (handle.includes("e")) R = pt.x;
+  if (handle.includes("n")) T = pt.y;
+  if (handle.includes("s")) B = pt.y;
+  return { x1: L, y1: B, x2: R, y2: T };
 }
 
 /** CSS stack that approximates a family so the on-page text box looks like the result. */
@@ -151,6 +211,18 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const [newText, setNewText] = useState("");
   const [font, setFont] = useState<string>(FAMILIES[0]);
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("rect");
+  const [shapeColor, setShapeColor] = useState("#2563eb");
+  const [shapeWidth, setShapeWidth] = useState(2);
+  const [shapeFill, setShapeFill] = useState(false);
+  const [shapeMenu, setShapeMenu] = useState(false);
+  const shapeMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!shapeMenu) return;
+    const close = (e: MouseEvent) => { if (!shapeMenuRef.current?.contains(e.target as Node)) setShapeMenu(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [shapeMenu]);
   const [nBold, setNBold] = useState(false);
   const [nItalic, setNItalic] = useState(false);
   const [size, setSize] = useState(14);
@@ -364,6 +436,18 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     color: hex => run("Changing colour…", s => s.restyleText(activePage, singleRun, { color: hexToRgb(hex) }), activePage, "Colour changed"),
   } : null;
 
+  // Selected shape (drawn by this editor): style and duplicate act on it; resize handles live on the page overlay.
+  const shapeObj = singleObj?.type === "shape" ? (singleObj as unknown as LayahShapeObject) : null;
+  const shapeActions: ShapeActions | null = shapeObj && activePage !== null ? {
+    kind: shapeObj.shape.kind,
+    closed: shapeObj.shape.kind === "rect" || shapeObj.shape.kind === "ellipse",
+    width: shapeObj.shape.strokeWidth,
+    setWidth: w => run("Updating shape…", s => s.updateShape(activePage, shapeObj.id, { strokeWidth: w }), activePage, "Thickness changed"),
+    setStroke: hex => run("Updating shape…", s => s.updateShape(activePage, shapeObj.id, { stroke: hexToRgb(hex) }), activePage, "Colour changed"),
+    setFill: hex => run("Updating shape…", s => s.updateShape(activePage, shapeObj.id, { fill: hex ? hexToRgb(hex) : null }), activePage, hex ? "Fill changed" : "Fill removed"),
+    duplicate: () => run("Duplicating…", s => s.duplicateShape(activePage, shapeObj.id), activePage, "Shape duplicated"),
+  } : null;
+
   const onPickImage = async (f: File | undefined) => {
     if (!f) return;
     setBusy("Reading image…"); setError(null);
@@ -384,10 +468,21 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
       const left = Math.max(0, Math.min(x, pg.width - w)), top = Math.min(pg.height, Math.max(h, y));
       run("Inserting image…", s => s.addImage(pageIndex, { rgba: pendingImage.rgba, pixelWidth: pendingImage.pw, pixelHeight: pendingImage.ph, x: left, y: top - h, width: w, height: h }), pageIndex, "Image added")
         .then(() => { setPendingImage(null); setTool("select"); });
-    } else if (tool === "rect") {
-      run("Adding rectangle…", async s => { await s.addRect(pageIndex, { x, y: y - 50, width: 120, height: 50, stroke: hexToRgb(color), strokeWidth: 2 }); }, pageIndex, "Rectangle added")
-        .then(() => setTool("select"));
     }
+  };
+
+  /** Draw a shape from drag start `a` to end `b` (PDF points). A plain click makes a standard-size shape. */
+  const drawShape = (pageIndex: number, a: { x: number; y: number }, b: { x: number; y: number }) => {
+    let { x: x2, y: y2 } = b;
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 4) {
+      if (shapeKind === "rect" || shapeKind === "ellipse") { x2 = a.x + 120; y2 = a.y - 70; } else { x2 = a.x + 110; y2 = a.y; }
+    }
+    const closed = shapeKind === "rect" || shapeKind === "ellipse";
+    const rgb = hexToRgb(shapeColor);
+    const label = SHAPES.find(sh => sh.id === shapeKind)!.label;
+    run("Adding " + label.toLowerCase() + "…", async s => {
+      return s.addShape(pageIndex, { kind: shapeKind, x1: a.x, y1: a.y, x2, y2, stroke: rgb, strokeWidth: shapeWidth, fill: closed && shapeFill ? rgb : undefined });
+    }, pageIndex, label + " added").then(() => setTool("select"));
   };
 
   const whiteout = (pageIndex: number, r: { x: number; y: number; width: number; height: number }) =>
@@ -420,12 +515,13 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     ["text", "Text", "Add new text"],
     ["image", "Image", "Add an image from your computer"],
     ["whiteout", "Whiteout", "Cover part of the page with white"],
-    ["rect", "Rectangle", "Draw an outline rectangle"],
   ];
   const pickMode = (t: Tool) => {
     setPlacement(null); setEditing(null);
+    // Only the chosen tool is live: leaving Select drops the current selection so nothing else stays active.
+    if (t !== "select") { machine.reset(); sync(); }
     if (t === "image") { fileInput.current?.click(); return; }
-    setPendingImage(null); setTool(t);
+    setPendingImage(null); setShapeMenu(false); setTool(t);
   };
   const hint = tool === "image" && pendingImage ? `Click on the page to place "${pendingImage.name}".` : HINTS[tool];
   const cancelImage = tool === "image" && pendingImage;
@@ -487,6 +583,37 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
           </button>
         ))}
       </div>
+      <div ref={shapeMenuRef} className="relative shrink-0">
+        <div className="inline-flex border border-slate-200 rounded-md overflow-hidden">
+          <button className={seg(tool === "shape")} disabled={!!busy} title={"Draw a shape (" + SHAPES.find(sh => sh.id === shapeKind)!.label.toLowerCase() + ")"} aria-pressed={tool === "shape"} onClick={() => pickMode("shape")}>
+            <Icon name={shapeKind} /><span className="hidden sm:inline">Shapes</span>
+          </button>
+          <button className={seg(tool === "shape") + " !px-1.5"} disabled={!!busy} aria-label="Choose a shape" aria-haspopup="menu" aria-expanded={shapeMenu} title="Choose a shape" onClick={() => setShapeMenu(o => !o)}>
+            <Icon name="chevron" />
+          </button>
+        </div>
+        {shapeMenu && (
+          <div role="menu" className="absolute left-0 top-full mt-1 z-[70] w-44 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+            {SHAPES.map(sh => (
+              <button key={sh.id} role="menuitem" onClick={() => { setShapeKind(sh.id); setPlacement(null); setEditing(null); setPendingImage(null); setShapeMenu(false); setTool("shape"); }}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left ${shapeKind === sh.id && tool === "shape" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"}`}>
+                <Icon name={sh.id} />{sh.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {tool === "shape" && (
+        <div className="inline-flex shrink-0 items-center gap-2 text-xs text-slate-600">
+          <input type="color" value={shapeColor} onChange={e => setShapeColor(e.target.value)} aria-label="Shape colour" title="Shape colour" className="h-8 w-9 p-1 border border-slate-200 rounded bg-white cursor-pointer" />
+          <select value={shapeWidth} onChange={e => setShapeWidth(Number(e.target.value))} aria-label="Line thickness" title="Line thickness" className="h-8 border border-slate-200 rounded bg-white text-xs px-1">
+            <option value={1}>Thin</option><option value={2}>Medium</option><option value={4}>Thick</option><option value={8}>Extra thick</option>
+          </select>
+          {(shapeKind === "rect" || shapeKind === "ellipse") && (
+            <label className="flex items-center gap-1 cursor-pointer select-none"><input type="checkbox" checked={shapeFill} onChange={e => setShapeFill(e.target.checked)} />Filled</label>
+          )}
+        </div>
+      )}
       <div className="inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden">
         <button className={seg(false)} disabled={!!busy || !session.canUndo} onClick={undo} title="Undo (Ctrl+Z)"><Icon name="undo" /><span className="hidden sm:inline">Undo</span></button>
         <button className={seg(false)} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /><span className="hidden sm:inline">Redo</span></button>
@@ -529,8 +656,11 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
               disabled={!!busy}
               onPlace={place}
               onWhiteout={whiteout}
+              onShape={drawShape}
+              onReshape={(p, id, c) => run("Resizing…", s => s.updateShape(p, id, c), p, "Shape resized")}
+              shapeStyle={{ kind: shapeKind, color: shapeColor, width: shapeWidth, fill: shapeFill }}
               onMove={(p, ids, dx, dy) => run("Moving…", s => s.move(p, ids, dx, dy), p, "Moved")}
-              actions={{ clear: () => { machine.reset(); sync(); }, canEdit: textRunOnly, isImage: singleObj?.type === "image", edit: startEdit, del: deleteSelection, resize: resizeSelection, text: textActions }}
+              actions={{ shape: shapeActions, clear: () => { machine.reset(); sync(); }, canEdit: textRunOnly, isImage: singleObj?.type === "image", edit: startEdit, del: deleteSelection, resize: resizeSelection, text: textActions }}
               editUi={editUi}
               placeUi={placeUi}
             />
@@ -569,11 +699,14 @@ function useElementSize(ref: React.RefObject<HTMLElement | null>) {
   return size;
 }
 
-function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync, tool, placing, disabled, onPlace, onWhiteout, onMove, actions, editUi, placeUi }: {
+function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync, tool, placing, disabled, onPlace, onWhiteout, onShape, onReshape, shapeStyle, onMove, actions, editUi, placeUi }: {
   pageIndex: number; session: EditorSession; rev: number; machine: InteractionStateMachine; editorState: LayahEditorState;
   sync: () => void; tool: Tool; placing: Placement; disabled: boolean;
   onPlace: (pageIndex: number, x: number, y: number) => void;
   onWhiteout: (pageIndex: number, r: { x: number; y: number; width: number; height: number }) => void;
+  onShape: (pageIndex: number, a: { x: number; y: number }, b: { x: number; y: number }) => void;
+  onReshape: (pageIndex: number, id: string, geometry: { x1: number; y1: number; x2: number; y2: number }) => void;
+  shapeStyle: { kind: ShapeKind; color: string; width: number; fill: boolean };
   onMove: (pageIndex: number, ids: string[], dx: number, dy: number) => void;
   actions: SelectionActions;
   editUi: ((zoom: number) => React.ReactNode) | null;
@@ -582,6 +715,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const ref = useRef<HTMLDivElement>(null);
   const size = useElementSize(ref);
   const [wo, setWo] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  const [hd, setHd] = useState<{ id: string; handle: string; cur: { x1: number; y1: number; x2: number; y2: number } } | null>(null);
   const [hover, setHover] = useState<{ id: string; bounds: { left: number; right: number; top: number; bottom: number } } | null>(null);
   void rev;
   const page = pageOf(session, pageIndex);
@@ -602,7 +736,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const onPointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
     const pt = toPdf(e);
-    if (tool === "whiteout") {
+    if (tool === "whiteout" || tool === "shape") {
       setWo({ a: pt, b: pt });
       try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer */ }
       return;
@@ -624,6 +758,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const onPointerUp = (e: React.PointerEvent) => {
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
     if (wo) {
+      if (tool === "shape") { const { a, b } = wo; setWo(null); onShape(pageIndex, a, b); return; }
       const x = Math.min(wo.a.x, wo.b.x), y = Math.min(wo.a.y, wo.b.y);
       const width = Math.abs(wo.a.x - wo.b.x), height = Math.abs(wo.a.y - wo.b.y);
       setWo(null);
@@ -649,13 +784,13 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     ? { x: dragPt.x * ctx.zoom, y: -dragPt.y * ctx.zoom }
     : { x: 0, y: 0 };
 
-  const selectedBounds = mine
+  const selectedBounds = mine && tool === "select"
     ? editorState.selectedObjectIds.flatMap(id => {
         const o = page.layout.runs[id] ?? page.layout.textBlocks[id] ?? page.objects[id];
         if (!o) return [];
         const b = pdfToViewportBounds(o.bounds, ctx);
         let previewText: string | undefined;
-        let objectType: "text" | "image" | "rect" | "other" = "other";
+        let objectType: "text" | "image" | "rect" | "shape" | "other" = "other";
         if (page.layout.runs[id]) {
           const run = page.layout.runs[id];
           previewText = run.sourceObjectIds.map(sid => (page.objects[sid] as LayahTextObject)?.text || "").join(" ").trim();
@@ -671,6 +806,8 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
             previewText = (obj as LayahTextObject).text;
           } else if (obj.type === "image") {
             objectType = "image";
+          } else if (obj.type === "shape") {
+            objectType = "shape";
           } else {
             objectType = "other";
           }
@@ -678,6 +815,9 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         return [{ id, bounds: { left: b.left + drag.x, right: b.right + drag.x, top: b.top + drag.y, bottom: b.bottom + drag.y }, text: previewText, type: objectType }];
       })
     : [];
+  const selShape = mine && editorState.selectedObjectIds.length === 1
+    ? (() => { const o = page.objects[editorState.selectedObjectIds[0]]; return o && o.type === "shape" ? (o as unknown as LayahShapeObject) : null; })()
+    : null;
   const group = selectedBounds.length > 1 ? {
     left: Math.min(...selectedBounds.map(b => b.bounds.left)), top: Math.min(...selectedBounds.map(b => b.bounds.top)),
     right: Math.max(...selectedBounds.map(b => b.bounds.right)), bottom: Math.max(...selectedBounds.map(b => b.bounds.bottom)),
@@ -694,7 +834,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     <div
       ref={ref}
       data-testid={`editor-overlay-${pageIndex}`}
-      className={`absolute inset-0 z-50 ${tool === "whiteout" || (tool === "select" && mine && editorState.selectedObjectIds.length > 0) ? "touch-none" : "touch-pan-y"} ${
+      className={`absolute inset-0 z-50 ${tool === "whiteout" || tool === "shape" || (tool === "select" && mine && editorState.selectedObjectIds.length > 0) ? "touch-none" : "touch-pan-y"} ${
         tool === "select"
           ? editorState.phase === "dragging"
             ? "cursor-grabbing"
@@ -718,9 +858,70 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         dragDeltaPt={dragPt}
       />
       {marker && <div className="absolute bg-blue-600 pointer-events-none" style={{ left: marker.left, top: marker.top, width: 2, height: marker.bottom - marker.top }} />}
-      {wo && (() => {
+      {wo && tool === "shape" && (() => {
+        const pa = pdfToViewportBounds({ left: wo.a.x, right: wo.a.x, bottom: wo.a.y, top: wo.a.y }, ctx);
+        const pb = pdfToViewportBounds({ left: wo.b.x, right: wo.b.x, bottom: wo.b.y, top: wo.b.y }, ctx);
+        const x1 = pa.left, y1 = pa.top, x2 = pb.left, y2 = pb.top;
+        const w = shapeStyle.width * ctx.zoom, closed = shapeStyle.kind === "rect" || shapeStyle.kind === "ellipse";
+        const common = { stroke: shapeStyle.color, strokeWidth: w, fill: closed && shapeStyle.fill ? shapeStyle.color : "none", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+        const ang = Math.atan2(y2 - y1, x2 - x1), head = Math.min(Math.hypot(x2 - x1, y2 - y1) * 0.45, Math.max(10, w * 5));
+        return (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" aria-hidden>
+            {shapeStyle.kind === "rect" && <rect x={Math.min(x1, x2)} y={Math.min(y1, y2)} width={Math.abs(x2 - x1)} height={Math.abs(y2 - y1)} {...common} />}
+            {shapeStyle.kind === "ellipse" && <ellipse cx={(x1 + x2) / 2} cy={(y1 + y2) / 2} rx={Math.abs(x2 - x1) / 2} ry={Math.abs(y2 - y1) / 2} {...common} />}
+            {(shapeStyle.kind === "line" || shapeStyle.kind === "arrow") && <line x1={x1} y1={y1} x2={x2} y2={y2} {...common} />}
+            {shapeStyle.kind === "arrow" && <polyline points={`${x2 + head * Math.cos(ang + Math.PI - 0.5)},${y2 + head * Math.sin(ang + Math.PI - 0.5)} ${x2},${y2} ${x2 + head * Math.cos(ang + Math.PI + 0.5)},${y2 + head * Math.sin(ang + Math.PI + 0.5)}`} {...common} fill="none" />}
+          </svg>
+        );
+      })()}
+      {wo && tool === "whiteout" && (() => {
         const r = pdfToViewportBounds({ left: Math.min(wo.a.x, wo.b.x), right: Math.max(wo.a.x, wo.b.x), bottom: Math.min(wo.a.y, wo.b.y), top: Math.max(wo.a.y, wo.b.y) }, ctx);
         return <div className="absolute border border-blue-500 border-dashed bg-white/70 pointer-events-none" style={{ left: r.left, top: r.top, width: r.right - r.left, height: r.bottom - r.top }} />;
+      })()}
+
+      {/* Resize handles for a selected shape: drag to reshape (rect/ellipse: 8 handles, line/arrow: the two ends). */}
+      {selShape && !disabled && tool === "select" && editorState.phase === "idle" && (() => {
+        const g = hd ? hd.cur : selShape.shape;
+        const pt = (x: number, y: number) => { const v = pdfToViewportBounds({ left: x, right: x, bottom: y, top: y }, ctx); return { x: v.left, y: v.top }; };
+        const closed = selShape.shape.kind === "rect" || selShape.shape.kind === "ellipse";
+        const L = Math.min(g.x1, g.x2), R = Math.max(g.x1, g.x2), B = Math.min(g.y1, g.y2), T = Math.max(g.y1, g.y2);
+        const points: [string, number, number, string][] = closed
+          ? [["nw", L, T, "nwse-resize"], ["n", (L + R) / 2, T, "ns-resize"], ["ne", R, T, "nesw-resize"], ["e", R, (B + T) / 2, "ew-resize"],
+             ["se", R, B, "nwse-resize"], ["s", (L + R) / 2, B, "ns-resize"], ["sw", L, B, "nesw-resize"], ["w", L, (B + T) / 2, "ew-resize"]]
+          : [["p1", g.x1, g.y1, "crosshair"], ["p2", g.x2, g.y2, "crosshair"]];
+        const a = pt(g.x1, g.y1), b = pt(g.x2, g.y2);
+        const ghost = { stroke: "#3b82f6", strokeWidth: 1, strokeDasharray: "4 3", fill: "none" } as const;
+        return <>
+          {hd && (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" aria-hidden>
+              {selShape.shape.kind === "rect" && <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} {...ghost} />}
+              {selShape.shape.kind === "ellipse" && <ellipse cx={(a.x + b.x) / 2} cy={(a.y + b.y) / 2} rx={Math.abs(b.x - a.x) / 2} ry={Math.abs(b.y - a.y) / 2} {...ghost} />}
+              {(selShape.shape.kind === "line" || selShape.shape.kind === "arrow") && <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...ghost} />}
+            </svg>
+          )}
+          {points.map(([h, x, y, cursor]) => {
+            const v = pt(x, y);
+            return (
+              <div key={h} role="slider" aria-label={`Resize handle ${h}`} data-handle={h}
+                className="absolute z-[61] w-3 h-3 -ml-1.5 -mt-1.5 bg-white border-2 border-blue-500 pointer-events-auto touch-none"
+                style={{ left: v.x, top: v.y, cursor }}
+                onPointerDown={e => { e.stopPropagation(); e.preventDefault(); try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ } setHd({ id: selShape.id, handle: h, cur: { x1: selShape.shape.x1, y1: selShape.shape.y1, x2: selShape.shape.x2, y2: selShape.shape.y2 } }); }}
+                onPointerMove={e => { e.stopPropagation(); if (hd && hd.handle === h) setHd({ ...hd, cur: dragHandle(selShape.shape, h, toPdf(e)) }); }}
+                onPointerUp={e => {
+                  e.stopPropagation();
+                  try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+                  if (hd && hd.handle === h) {
+                    const c = hd.cur;
+                    setHd(null);
+                    if (Math.hypot(c.x1 - selShape.shape.x1, c.y1 - selShape.shape.y1) + Math.hypot(c.x2 - selShape.shape.x2, c.y2 - selShape.shape.y2) > 0.5) onReshape(pageIndex, selShape.id, c);
+                  }
+                }}
+                onPointerCancel={e => { e.stopPropagation(); setHd(null); }}
+                onLostPointerCapture={e => e.stopPropagation()}
+                onDoubleClick={e => e.stopPropagation()} />
+            );
+          })}
+        </>;
       })()}
 
       {/* Floating UI. Pointer events stop here so pressing a control never starts a select/drag gesture. */}
@@ -729,7 +930,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         const anchor = group ?? selectedBounds[0]?.bounds ?? null;
         const clampLeft = (left: number, width: number) => Math.max(0, Math.min(left, size.width - width));
         return <>
-          {anchor && !disabled && editorState.phase === "idle" && !(editUi && selectedBounds.length === 1) && (
+          {anchor && !disabled && !hd && editorState.phase === "idle" && !(editUi && selectedBounds.length === 1) && (
             <SelectionBar actions={actions} count={selectedBounds.length}
               style={{ left: clampLeft(anchor.left, Math.min(size.width, 330)), maxWidth: Math.max(size.width, 220), ...(anchor.top < 60 ? { top: anchor.bottom + 6 } : { top: anchor.top - 6, transform: "translateY(-100%)" }) }} />
           )}

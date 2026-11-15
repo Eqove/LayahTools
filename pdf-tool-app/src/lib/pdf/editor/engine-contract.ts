@@ -1,4 +1,4 @@
-import type { PdfImageOptions, PdfPageInfo, PdfPageObject, PdfRectOptions, PdfTextOptions, PdfTransform } from "./types";
+import type { PdfImageOptions, PdfPageInfo, PdfPageObject, PdfRectOptions, PdfShapeOptions, PdfTextOptions, PdfTransform } from "./types";
 
 /**
  * The narrow engine surface `EditorSession` depends on (types only). `PdfEditorEngine` implements it; tests inject
@@ -22,6 +22,7 @@ export interface EditorEngine {
   addText(pageIndex: number, options: PdfTextOptions): Promise<string>;
   addImage(pageIndex: number, options: PdfImageOptions): Promise<string>;
   addRect(pageIndex: number, options: PdfRectOptions): Promise<string>;
+  addShape(pageIndex: number, options: PdfShapeOptions): Promise<string>;
   /** Must return a freshly allocated array every call. */
   export(): Promise<Uint8Array>;
   dispose(): void;

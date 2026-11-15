@@ -134,6 +134,7 @@ export function Workspace() {
   // Phase 2 states: Metadata drawer, Password dialog, File size dismissal
   const [isMetadataOpen, setIsMetadataOpen] = useState(false);
   // Phone layout: Files / outputs / tool options live in a slide-up sheet instead of a side column.
+  const [editPage, setEditPage] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pendingPasswordFile, setPendingPasswordFile] = useState<File | null>(null);
   const [dismissedLargeFiles, setDismissedLargeFiles] = useState<Set<string>>(new Set());
@@ -495,7 +496,28 @@ export function Workspace() {
 
                     {/* Edit Tool Integration */}
                     {files.length > 0 && activeTool === "edit" && (
+                      <div className="flex-1 flex overflow-hidden">
+                        <div className="hidden md:flex">
+                          <PageThumbnailSidebar
+                            file={activeFile}
+                            activePageIndex={editPage}
+                            onPageSelect={(i) => {
+                              setEditPage(i);
+                              document.querySelector(`[data-page-number="${i + 1}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }}
+                            onFileModified={(updated) => replaceFile(active.id, updated)}
+                            onExtractOutput={async (extracted) => {
+                              const bytes = new Uint8Array(await extracted.arrayBuffer());
+                              setResults((prev) => [{ filename: extracted.name, bytes, sourceSize: activeFile?.size }, ...prev]);
+                              setStatus(`Extracted page output ready: ${extracted.name}`);
+                              setStatusTone("success");
+                            }}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0 overflow-hidden">
                        <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} />
+                        </div>
+                      </div>
                     )}
 
                     {/* PDF Viewer with Page Thumbnails Sidebar */}

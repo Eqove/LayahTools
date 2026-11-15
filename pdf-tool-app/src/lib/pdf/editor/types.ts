@@ -35,7 +35,17 @@ export interface PdfImageObject {
   transform: PdfTransform | null;
 }
 
-export type PdfPageObject = PdfTextObject | PdfImageObject;
+/** A shape drawn by this editor (path marked "LayahShape"); its parameters travel with the object in the PDF. */
+export interface PdfShapeObject {
+  id: string;
+  type: "shape";
+  pageIndex: number;
+  bounds: PdfObjectBounds;
+  transform: PdfTransform | null;
+  shape: PdfShapeOptions;
+}
+
+export type PdfPageObject = PdfTextObject | PdfImageObject | PdfShapeObject;
 
 export interface PdfPageInfo {
   pageIndex: number;
@@ -64,6 +74,19 @@ export interface PdfImageOptions {
   y: number;
   width: number;
   height: number;
+}
+
+/** A shape drawn from (x1,y1) to (x2,y2) in PDF points. For a rectangle/ellipse the two points are opposite corners. */
+export interface PdfShapeOptions {
+  kind: "rect" | "ellipse" | "line" | "arrow";
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** Closed shapes only (rect, ellipse). */
+  fill?: [number, number, number];
+  stroke?: [number, number, number];
+  strokeWidth?: number;
 }
 
 export interface PdfRectOptions {

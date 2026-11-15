@@ -1,14 +1,14 @@
 import { PdfEditorEngine } from "./engine";
 import type { EditorEngine } from "./engine-contract";
 import { EditorSessionError, EngineError, FontCoverageError } from "./errors";
-import type { PdfImageOptions, PdfRectOptions, PdfTextOptions } from "./types";
+import type { PdfImageOptions, PdfRectOptions, PdfShapeOptions, PdfTextOptions } from "./types";
 import { PdfToLayahMapper } from "../../document/mapper";
 import { deriveTextGeometry, getReadingOrder } from "../../document/geometry";
 import { inferTextLines, LayahTextLine } from "../../document/lines";
 import { inferTextRuns } from "../../document/runs";
 import { inferTextBlocks } from "../../document/blocks";
 import { LayahDocumentStore } from "../../document/store";
-import type { DeepReadonly, LayahObjectBounds, LayahPage, LayahSourceObject, LayahTextObject } from "../../document/types";
+import type { DeepReadonly, LayahObjectBounds, LayahPage, LayahShapeObject, LayahSourceObject, LayahTextObject } from "../../document/types";
 
 export { EditorSessionError, FontCoverageError };
 export type { EditorErrorCode } from "./errors";
@@ -350,6 +350,60 @@ export class EditorSession {
     });
   }
 
+  /** Shapes (rectangle, ellipse, line, arrow) are written to the page as editable objects; returns the new shape's id. */
+  addShape(pageIndex: number, o: PdfShapeOptions): Promise<string[]> {
+    return this.add(pageIndex, "shape", async () => {
+      this.checkShape(o);
+      return this.engine.addShape(pageIndex, o);
+    }, { x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2 });
+  }
+
+  private checkShape(o: PdfShapeOptions): void {
+    const dx = Math.abs(o.x2 - o.x1), dy = Math.abs(o.y2 - o.y1);
+    const closed = o.kind === "rect" || o.kind === "ellipse";
+    if (closed ? dx < 1 || dy < 1 : Math.hypot(dx, dy) < 1) throw this.err("INVALID_ARGUMENT", "That shape is too small to draw.", { param: "size" });
+  }
+
+  private shapeAt(pageIndex: number, id: string): { src: string; shape: LayahShapeObject["shape"] } {
+    const page = this.cur.store.getPage(pageIndex)!;
+    const src = this.resolve(pageIndex, [id]);
+    const obj = src.length === 1 ? page.objects[src[0]] : undefined;
+    if (!obj || obj.type !== "shape") throw this.err("NOTHING_TO_DO", "Select a single shape first.");
+    return { src: src[0], shape: obj.shape as LayahShapeObject["shape"] };
+  }
+
+  /**
+   * Change a shape's geometry or style (points, stroke colour/width, fill; `fill: null` removes the fill). The shape is
+   * redrawn from its stored parameters, so strokes keep their width when resized. Returns the shape's new id.
+   */
+  updateShape(pageIndex: number, id: string, patch: Partial<Pick<PdfShapeOptions, "x1" | "y1" | "x2" | "y2" | "stroke" | "strokeWidth">> & { fill?: [number, number, number] | null }): Promise<string[]> {
+    return this.enqueue(async () => {
+      this.readyPage(pageIndex);
+      const { src, shape } = this.shapeAt(pageIndex, id);
+      const next: PdfShapeOptions = { ...shape, ...patch, fill: patch.fill === undefined ? shape.fill : patch.fill ?? undefined };
+      this.finite({ x1: next.x1, y1: next.y1, x2: next.x2, y2: next.y2 });
+      this.checkShape(next);
+      await this.transact(async () => {
+        await this.engine.deleteObject(pageIndex, this.ptr(src)); this.cur.ptrs.delete(src);
+        await this.engine.addShape(pageIndex, next);
+      });
+      const last = Object.values(this.cur.store.getPage(pageIndex)!.objects).filter(o => o.type === "shape").pop();
+      return last ? this.layoutIdsIn(pageIndex, [last.id]) : [];
+    });
+  }
+
+  /** Copy a shape, offset a little so the copy is visible. Returns the copy's id. */
+  duplicateShape(pageIndex: number, id: string, dx = 14, dy = -14): Promise<string[]> {
+    return this.enqueue(async () => {
+      this.readyPage(pageIndex);
+      const { shape } = this.shapeAt(pageIndex, id);
+      const copy: PdfShapeOptions = { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy };
+      await this.transact(async () => { await this.engine.addShape(pageIndex, copy); });
+      const last = Object.values(this.cur.store.getPage(pageIndex)!.objects).filter(o => o.type === "shape").pop();
+      return last ? this.layoutIdsIn(pageIndex, [last.id]) : [];
+    });
+  }
+
   /** Scale/translate an object (image or text) so its bounds become `to`. */
   resize(pageIndex: number, id: string, to: LayahObjectBounds): Promise<string[]> {
     return this.enqueue(async () => {
@@ -481,7 +535,7 @@ export class EditorSession {
     return p;
   }
 
-  private add(pageIndex: number, type: "text" | "image", create: () => Promise<string>, nums: Record<string, unknown>): Promise<string[]> {
+  private add(pageIndex: number, type: "text" | "image" | "shape", create: () => Promise<string>, nums: Record<string, unknown>): Promise<string[]> {
     return this.enqueue(async () => {
       this.readyPage(pageIndex);
       this.finite(nums);

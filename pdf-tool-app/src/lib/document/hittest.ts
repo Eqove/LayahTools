@@ -6,6 +6,8 @@ export interface HitTestableObject {
   bounds: LayahObjectBounds;
   // Allows hit testing to prioritize smaller objects (e.g. text run over text block) if they both overlap
   area?: number; 
+  /** Optional precise test run after the bounds check (e.g. distance to a line). */
+  hit?: (pt: PdfPoint) => boolean;
 }
 
 /**
@@ -20,7 +22,8 @@ export function hitTestPoint(pdfPt: PdfPoint, objects: HitTestableObject[]): str
     pdfPt.x >= obj.bounds.left &&
     pdfPt.x <= obj.bounds.right &&
     pdfPt.y >= obj.bounds.bottom &&
-    pdfPt.y <= obj.bounds.top
+    pdfPt.y <= obj.bounds.top &&
+    (!obj.hit || obj.hit(pdfPt))
   );
 
   if (matches.length === 0) return null;

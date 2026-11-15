@@ -7,7 +7,7 @@ import type {
   PdfTransform, 
   PdfTextOptions,
   PdfImageOptions,
-  PdfRectOptions
+  PdfRectOptions, PdfShapeOptions, PdfShapeObject
 } from "./types";
 import type { EditorEngine } from "./engine-contract";
 import { EngineError } from "./errors";
@@ -16,6 +16,9 @@ import { EngineError } from "./errors";
  * A high-level abstraction over the PDFium WASM engine for deep visual PDF edits.
  * Designed to cleanly encapsulate all raw pointer, malloc/free, and C-struct logic.
  */
+const SHAPE_MARK = "LayahShape";
+const SHAPE_KINDS: PdfShapeOptions["kind"][] = ["rect", "ellipse", "line", "arrow"];
+
 export class PdfEditorEngine implements EditorEngine {
   private pdfium: any = null;
   private wasm: any = null;
@@ -144,7 +147,7 @@ export class PdfEditorEngine implements EditorEngine {
    * valid only until the next load()/dispose().
    */
   async getEditableObjects(pageIndex: number): Promise<PdfPageObject[]> {
-    return this.getObjectsByType(pageIndex, [1, 3]);
+    return this.getObjectsByType(pageIndex, [1, 2, 3]);
   }
 
   /**
@@ -198,6 +201,7 @@ export class PdfEditorEngine implements EditorEngine {
       transform.a, transform.b, transform.c,
       transform.d, transform.e, transform.f
     );
+    this.syncShapeMark(objPtr, transform);
     this.pdfium.FPDFPage_GenerateContent(page);
   }
 
@@ -317,6 +321,123 @@ export class PdfEditorEngine implements EditorEngine {
   }
 
   /**
+   * Adds a rectangle, ellipse, line or arrow as a native PDF path and marks it "LayahShape" with its parameters, so it
+   * can be found, restyled, moved and resized later (marks survive save and reload; other PDF software ignores them).
+   * Lines/arrows are stroke-only.
+   */
+  async addShape(pageIndex: number, o: PdfShapeOptions): Promise<string> {
+    this.ensureDocument();
+    const page = this.getPage(pageIndex);
+    const { x1, y1, x2, y2 } = o;
+    const left = Math.min(x1, x2), right = Math.max(x1, x2), bottom = Math.min(y1, y2), top = Math.max(y1, y2);
+    const p = this.pdfium;
+    let path: number;
+    let closed = true;
+    if (o.kind === "rect") {
+      path = p.FPDFPageObj_CreateNewRect(left, bottom, right - left, top - bottom);
+    } else if (o.kind === "ellipse") {
+      // Four cubic Béziers approximate an ellipse (k = 4/3 * (sqrt(2) - 1)).
+      const cx = (left + right) / 2, cy = (bottom + top) / 2, rx = (right - left) / 2, ry = (top - bottom) / 2, k = 0.5522847498;
+      path = p.FPDFPageObj_CreateNewPath(cx + rx, cy);
+      p.FPDFPath_BezierTo(path, cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry);
+      p.FPDFPath_BezierTo(path, cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy);
+      p.FPDFPath_BezierTo(path, cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry);
+      p.FPDFPath_BezierTo(path, cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy);
+      p.FPDFPath_Close(path);
+    } else {
+      closed = false;
+      path = p.FPDFPageObj_CreateNewPath(x1, y1);
+      p.FPDFPath_LineTo(path, x2, y2);
+      if (o.kind === "arrow") {
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const head = Math.min(len * 0.45, Math.max(10, (o.strokeWidth ?? 2) * 5));
+        const ang = Math.atan2(y2 - y1, x2 - x1);
+        p.FPDFPath_MoveTo(path, x2 + head * Math.cos(ang + Math.PI - 0.5), y2 + head * Math.sin(ang + Math.PI - 0.5));
+        p.FPDFPath_LineTo(path, x2, y2);
+        p.FPDFPath_LineTo(path, x2 + head * Math.cos(ang + Math.PI + 0.5), y2 + head * Math.sin(ang + Math.PI + 0.5));
+      }
+    }
+    if (!path) throw new Error("Failed to create shape");
+    const stroke = o.stroke ?? [0, 0, 0];
+    const width = o.strokeWidth ?? 2;
+    p.FPDFPageObj_SetStrokeColor(path, stroke[0], stroke[1], stroke[2], 255);
+    p.FPDFPageObj_SetStrokeWidth(path, width);
+    p.FPDFPageObj_SetLineCap(path, 1);
+    p.FPDFPageObj_SetLineJoin(path, 1);
+    const fill = closed ? o.fill : undefined;
+    if (fill) p.FPDFPageObj_SetFillColor(path, fill[0], fill[1], fill[2], 255);
+    p.FPDFPath_SetDrawMode(path, fill ? 1 : 0, true);
+    this.writeShapeMark(path, { ...o, stroke, strokeWidth: width, fill });
+    p.FPDFPage_InsertObject(page, path);
+    p.FPDFPage_GenerateContent(page);
+    return `ptr_${path}`;
+  }
+
+  /** Stores the shape's parameters on the object as marked content so they survive save/reload. */
+  private writeShapeMark(obj: number, o: PdfShapeOptions): void {
+    const p = this.pdfium;
+    const mark = p.FPDFPageObj_AddMark(obj, SHAPE_MARK);
+    if (!mark) throw new Error("Failed to mark shape");
+    const setI = (k: string, v: number) => p.FPDFPageObjMark_SetIntParam(this.docPtr, obj, mark, k, Math.round(v));
+    const setF = (k: string, v: number) => p.FPDFPageObjMark_SetFloatParam(this.docPtr, obj, mark, k, v);
+    setI("lk", SHAPE_KINDS.indexOf(o.kind));
+    setF("x1", o.x1); setF("y1", o.y1); setF("x2", o.x2); setF("y2", o.y2);
+    setF("sw", o.strokeWidth ?? 2);
+    const st = o.stroke ?? [0, 0, 0];
+    setI("sr", st[0]); setI("sg", st[1]); setI("sb", st[2]);
+    setI("hf", o.fill ? 1 : 0);
+    const fi = o.fill ?? [0, 0, 0];
+    setI("fr", fi[0]); setI("fg", fi[1]); setI("fb", fi[2]);
+  }
+
+  /** The mark pointer if `obj` is a shape drawn by this editor, else 0. */
+  private findShapeMark(obj: number): number {
+    const n = this.pdfium.FPDFPageObj_CountMarks(obj);
+    if (!n) return 0;
+    const buf = this.wasm._malloc(4);
+    try {
+      for (let i = 0; i < n; i++) {
+        const mark = this.pdfium.FPDFPageObj_GetMark(obj, i);
+        if (mark && this.pdfium.FPDFPageObjMark_GetParamIntValue(mark, "lk", buf)) return mark;
+      }
+      return 0;
+    } finally {
+      this.wasm._free(buf);
+    }
+  }
+
+  private readShape(obj: number): PdfShapeOptions | null {
+    const mark = this.findShapeMark(obj);
+    if (!mark) return null;
+    const buf = this.wasm._malloc(4);
+    try {
+      const getI = (k: string) => (this.pdfium.FPDFPageObjMark_GetParamIntValue(mark, k, buf) ? this.wasm.getValue(buf, "i32") : 0);
+      const getF = (k: string) => (this.pdfium.FPDFPageObjMark_GetParamFloatValue(mark, k, buf) ? this.wasm.getValue(buf, "float") : 0);
+      const kind = SHAPE_KINDS[getI("lk")];
+      if (!kind) return null;
+      return {
+        kind, x1: getF("x1"), y1: getF("y1"), x2: getF("x2"), y2: getF("y2"), strokeWidth: getF("sw"),
+        stroke: [getI("sr"), getI("sg"), getI("sb")],
+        fill: getI("hf") ? [getI("fr"), getI("fg"), getI("fb")] : undefined,
+      };
+    } finally {
+      this.wasm._free(buf);
+    }
+  }
+
+  /** After a move/scale the stored points (and stroke width) must follow the object, or later restyling would snap it back. */
+  private syncShapeMark(obj: number, t: PdfTransform): void {
+    const mark = this.findShapeMark(obj);
+    if (!mark) return;
+    const s = this.readShape(obj);
+    if (!s) return;
+    const set = (k: string, v: number) => this.pdfium.FPDFPageObjMark_SetFloatParam(this.docPtr, obj, mark, k, v);
+    set("x1", t.a * s.x1 + t.c * s.y1 + t.e); set("y1", t.b * s.x1 + t.d * s.y1 + t.f);
+    set("x2", t.a * s.x2 + t.c * s.y2 + t.e); set("y2", t.b * s.x2 + t.d * s.y2 + t.f);
+    set("sw", (s.strokeWidth ?? 2) * Math.sqrt(Math.abs(t.a * t.d - t.b * t.c)));
+  }
+
+  /**
    * Exports the mutated document to a new Uint8Array.
    */
   async export(): Promise<Uint8Array> {
@@ -426,6 +547,13 @@ export class PdfEditorEngine implements EditorEngine {
       const objPtr = this.pdfium.FPDFPage_GetObject(page, i);
       const type = this.pdfium.FPDFPageObj_GetType(objPtr);
       
+      // Paths are only editable when this editor drew them (marked); every other vector line stays untouched.
+      let shape: PdfShapeOptions | null = null;
+      if (type === 2 && targetTypes.includes(2)) {
+        shape = this.readShape(objPtr);
+        if (!shape) continue;
+      }
+
       if (targetTypes.includes(type)) {
         const bounds = this.getObjectBounds(objPtr);
         const transform = this.getObjectMatrix(objPtr);
@@ -466,6 +594,8 @@ export class PdfEditorEngine implements EditorEngine {
         } else if (type === 3) {
           // IMAGE
           results.push({ id, type: "image", pageIndex, bounds, transform } as PdfImageObject);
+        } else if (type === 2 && shape) {
+          results.push({ id, type: "shape", pageIndex, bounds, transform, shape } as PdfShapeObject);
         }
       }
     }

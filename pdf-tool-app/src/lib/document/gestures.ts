@@ -38,6 +38,14 @@ export const HIT_PAD_PT = 3;
  * Everything on a page that a click can hit: text lines and images. Multi-line text blocks are deliberately NOT click
  * targets: a click beside a line used to select the whole paragraph/column. A paragraph is selected with a drag box (it picks every line it touches).
  */
+/** Distance from a point to a segment, in PDF points. */
+function distToSegment(p: PdfPoint, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - ax) * dx + (p.y - ay) * dy) / len2));
+  return Math.hypot(p.x - (ax + t * dx), p.y - (ay + t * dy));
+}
+
 export function hitCandidates(page: PageView) {
   return [
     ...Object.values(page.layout.runs).map(r => ({
@@ -46,6 +54,16 @@ export function hitCandidates(page: PageView) {
       area: (r.bounds.right - r.bounds.left) * (r.bounds.top - r.bounds.bottom), // unpadded: the tighter line wins where padded lines overlap
     })),
     ...Object.values(page.objects).filter(o => o.type === "image").map(o => ({ id: o.id, bounds: o.bounds })),
+    // Shapes drawn by this editor. A line/arrow is hit only near the stroke (its box is mostly empty); a box/ellipse anywhere inside.
+    ...Object.values(page.objects).flatMap(o => {
+      if (o.type !== "shape") return [];
+      const sh = o.shape;
+      const pad = Math.max(4, sh.strokeWidth / 2 + 3);
+      const b = { left: o.bounds.left - pad, right: o.bounds.right + pad, bottom: o.bounds.bottom - pad, top: o.bounds.top + pad };
+      const area = (o.bounds.right - o.bounds.left) * (o.bounds.top - o.bounds.bottom);
+      const linear = sh.kind === "line" || sh.kind === "arrow";
+      return [{ id: o.id, bounds: b, area, hit: linear ? (pt: PdfPoint) => distToSegment(pt, sh.x1, sh.y1, sh.x2, sh.y2) <= pad : undefined }];
+    }),
   ];
 }
 
@@ -86,7 +104,7 @@ export function gestureUp(m: InteractionStateMachine, page: PageView, shift: boo
       const box = { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), bottom: Math.min(a.y, b.y), top: Math.max(a.y, b.y) };
       const hit = [
         ...Object.values(page.layout.runs),
-        ...Object.values(page.objects).filter(o => o.type === "image"),
+        ...Object.values(page.objects).filter(o => o.type === "image" || o.type === "shape"),
       ].filter(o => o.bounds.left < box.right && o.bounds.right > box.left && o.bounds.bottom < box.top && o.bounds.top > box.bottom).map(o => o.id);
       m.select([...new Set([...(shift ? st.selectedObjectIds : []), ...hit])], page.pageIndex);
     }
@@ -104,10 +122,10 @@ export function gestureCancel(m: InteractionStateMachine, pageIndex: number): vo
   if (gestureActive(m, pageIndex)) m.cancel();
 }
 
-/** Ctrl/Cmd+A: every run and image on the page. Selection only. */
+/** Ctrl/Cmd+A: every run, image and shape on the page. Selection only. */
 export function selectAllOnPage(m: InteractionStateMachine, page: PageView): void {
   m.select([
     ...Object.keys(page.layout.runs),
-    ...Object.values(page.objects).filter(o => o.type === "image").map(o => o.id),
+    ...Object.values(page.objects).filter(o => o.type === "image" || o.type === "shape").map(o => o.id),
   ], page.pageIndex);
 }

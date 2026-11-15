@@ -1,12 +1,14 @@
 import { 
   PdfPageObject, 
   PdfTextObject, 
-  PdfImageObject 
+  PdfImageObject,
+  PdfShapeObject
 } from "../pdf/editor/types";
 import { 
   LayahSourceObject, 
   LayahTextObject, 
   LayahImageObject, 
+  LayahShapeObject,
   LayahUnknownObject 
 } from "./types";
 
@@ -63,6 +65,15 @@ export class PdfToLayahMapper {
         ...baseProps,
         type: "image",
       } as LayahImageObject;
+    }
+
+    if (pdfObj.type === "shape") {
+      const sh = (pdfObj as PdfShapeObject).shape;
+      return {
+        ...baseProps,
+        type: "shape",
+        shape: { kind: sh.kind, x1: sh.x1, y1: sh.y1, x2: sh.x2, y2: sh.y2, strokeWidth: sh.strokeWidth ?? 2, stroke: sh.stroke ?? [0, 0, 0], fill: sh.fill },
+      } as LayahShapeObject;
     }
 
     // Acknowledge unknown objects safely without failing
