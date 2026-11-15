@@ -74,7 +74,7 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   "pdf.watermark": {
     id: "pdf.watermark",
     name: "Add Watermark",
-    category: "secure",
+    category: "create",
     supportedInputTypes: ["application/pdf"],
     supportedOutputTypes: ["application/pdf"],
     processingEngine: "pdf-lib",
@@ -88,7 +88,7 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   "pdf.page-numbers": {
     id: "pdf.page-numbers",
     name: "Page Numbers",
-    category: "organize",
+    category: "create",
     supportedInputTypes: ["application/pdf"],
     supportedOutputTypes: ["application/pdf"],
     processingEngine: "pdf-lib",
@@ -237,42 +237,6 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
       properties: {},
     }
   },
-  "pdf.pdf-to-word": {
-    id: "pdf.pdf-to-word",
-    name: "PDF to Word",
-    category: "convert",
-    supportedInputTypes: ["application/pdf"],
-    supportedOutputTypes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-    processingEngine: "cloud-document-services",
-    clientServerSuitability: "server-only",
-    workerRequirement: "none",
-    isDestructive: false,
-    supportsPreview: false,
-    summary: "Convert PDF to editable Word document (Requires Backend).",
-    supportsBatch: false,
-    aiActionSchema: {
-      type: "object",
-      properties: {},
-    }
-  },
-  "pdf.pdf-to-excel": {
-    id: "pdf.pdf-to-excel",
-    name: "PDF to Excel",
-    category: "convert",
-    supportedInputTypes: ["application/pdf"],
-    supportedOutputTypes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
-    processingEngine: "cloud-document-services",
-    clientServerSuitability: "server-only",
-    workerRequirement: "none",
-    isDestructive: false,
-    supportsPreview: false,
-    summary: "Convert PDF to Excel spreadsheet (Requires Backend).",
-    supportsBatch: false,
-    aiActionSchema: {
-      type: "object",
-      properties: {},
-    }
-  },
   "pdf.extract-tables": {
     id: "pdf.extract-tables",
     name: "Extract Tables",
@@ -294,7 +258,7 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   "pdf.edit": {
     id: "pdf.edit",
     name: "Edit PDF",
-    category: "organize",
+    category: "create",
     supportedInputTypes: ["application/pdf"],
     supportedOutputTypes: ["application/pdf"],
     processingEngine: "pdfium",
@@ -340,7 +304,7 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   "pdf.flatten": {
     id: "pdf.flatten",
     name: "Flatten Form",
-    category: "organize",
+    category: "create",
     supportedInputTypes: ["application/pdf"],
     supportedOutputTypes: ["application/pdf"],
     processingEngine: "pdf-lib",

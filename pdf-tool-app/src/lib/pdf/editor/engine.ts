@@ -130,6 +130,15 @@ export class PdfEditorEngine implements EditorEngine {
     }
   }
 
+  /** Recolours an existing object's fill; font and geometry are untouched. */
+  async setFillColor(pageIndex: number, objectId: string, color: [number, number, number]): Promise<void> {
+    this.ensureDocument();
+    const page = this.getPage(pageIndex);
+    const obj = this.parseObjectId(objectId);
+    if (!this.pdfium.FPDFPageObj_SetFillColor(obj, color[0], color[1], color[2], 255)) throw new Error(`Failed to recolour object ${objectId}`);
+    this.pdfium.FPDFPage_GenerateContent(page);
+  }
+
   /**
    * Retrieves every text and image object on a page. IDs are transient pointers
    * valid only until the next load()/dispose().

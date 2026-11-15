@@ -29,7 +29,8 @@ export function PdfViewer({
 }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [zoom, setZoom] = useState<number>(1);
+  // Phones start zoomed out so a whole page width fits; the toolbar zoom still works.
+  const [zoom, setZoom] = useState<number>(() => (typeof window !== "undefined" && window.innerWidth < 480 ? 0.5 : 1));
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 

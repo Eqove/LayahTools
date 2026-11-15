@@ -2,7 +2,6 @@
 
 import { useApp } from "@/lib/state/app-state";
 import { EntryState } from "./EntryState";
-import { FormatSwitcher } from "./FormatSwitcher";
 import { WorkspaceShell } from "./WorkspaceShell";
 import { Workspace } from "@/components/workspace/Workspace";
 
@@ -25,7 +24,6 @@ export function LayahShell() {
 
       <section id="workspace" className="w-full bg-white flex-1 pb-32">
         <div className="max-w-7xl mx-auto px-6">
-          <FormatSwitcher />
           <WorkspaceShell />
         </div>
       </section>
@@ -42,9 +40,6 @@ export function LayahShell() {
             <h4 className="font-medium text-slate-900 mb-4">Formats</h4>
             <ul className="space-y-3 text-sm text-slate-500">
               <li><a href="#workspace" className="hover:text-layah-primary transition-colors">PDF</a></li>
-              <li className="opacity-50">Word</li>
-              <li className="opacity-50">Excel</li>
-              <li className="opacity-50">Images</li>
             </ul>
           </div>
           <div>

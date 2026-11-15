@@ -23,7 +23,7 @@ export function PdfViewerToolbar({
   onNextPage,
 }: PdfViewerToolbarProps) {
   return (
-    <div className="h-12 bg-white border-b border-slate-200 shadow-sm flex items-center justify-between px-4 shrink-0">
+    <div className="h-10 bg-white border-b border-slate-200 shadow-sm flex items-center justify-between px-4 shrink-0">
       
       {/* Pagination Controls */}
       <div className="flex items-center gap-1">

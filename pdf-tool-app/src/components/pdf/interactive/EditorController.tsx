@@ -13,9 +13,101 @@ interface EditorControllerProps {
   onFileModified: (file: File) => void;
 }
 
-type Tool = "select" | "text" | "image" | "rect";
+type Tool = "select" | "text" | "image" | "whiteout" | "rect";
 type Placement = { pageIndex: number; x: number; y: number } | null;
 interface PendingImage { rgba: Uint8ClampedArray; pw: number; ph: number; name: string }
+
+const ICONS: Record<string, string> = {
+  select: "M5 3l14 7-6 2-2 6z",
+  text: "M4 6V4h16v2M12 4v16m-3 0h6",
+  image: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z",
+  whiteout: "M7 21h10M5.5 13.5l7-7a2 2 0 012.8 0l3.2 3.2a2 2 0 010 2.8l-6 6H9l-3.5-3.5a2 2 0 010-1.5z",
+  rect: "M4 6h16v12H4z",
+  undo: "M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6",
+  redo: "M21 10H11a8 8 0 00-8 8v2m18-10l-6 6m6-6l-6-6",
+  palette: "M12 3a9 9 0 100 18 2 2 0 002-2c0-1-1-1.5-1-2.5s1-1.5 2-1.5h2a3 3 0 003-3C20 7 16.5 3 12 3zM7.5 12h.01M9 8h.01M13 7h.01M16.5 9.5h.01",
+  trash: "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
+};
+const Icon = ({ name }: { name: string }) => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden><path d={ICONS[name]} /></svg>
+);
+const HINTS: Record<Tool, string> = {
+  select: "Select a line to edit, resize, recolour or delete it · drag to move",
+  text: "Click on the page where the text should go.",
+  image: "Click on the page to place your image.",
+  whiteout: "Drag a box over what you want to cover. This only covers it visually; to remove sensitive text, use Redact PDF.",
+  rect: "Click on the page to place an outline rectangle. It can be undone, but not selected afterwards.",
+};
+const SWATCHES = ["#000000", "#4b5563", "#dc2626", "#ea580c", "#16a34a", "#2563eb", "#9333ea", "#ffffff"];
+const FAMILIES = ["Helvetica", "Times", "Courier"] as const;
+/** Standard-14 PostScript name for a family + weight/slant (what PDFium can create without embedding a font). */
+function fontName(family: string, bold: boolean, italic: boolean): string {
+  if (family === "Times") return bold ? (italic ? "Times-BoldItalic" : "Times-Bold") : italic ? "Times-Italic" : "Times-Roman";
+  const base = family === "Courier" ? "Courier" : "Helvetica";
+  return bold ? (italic ? base + "-BoldOblique" : base + "-Bold") : italic ? base + "-Oblique" : base;
+}
+
+interface TextActions {
+  bold: boolean; italic: boolean; family: string;
+  size: (factor: number) => void;
+  style: (patch: { bold?: boolean; italic?: boolean; family?: string }) => void;
+  color: (hex: string) => void;
+}
+interface SelectionActions { canEdit: boolean; isImage: boolean; edit: () => void; del: () => void; resize: (factor: number) => void; text: TextActions | null }
+
+const stopProps = {
+  onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+  onPointerUp: (e: React.PointerEvent) => e.stopPropagation(),
+  onDoubleClick: (e: React.MouseEvent) => e.stopPropagation(),
+};
+
+function TB({ active, danger, className = "", ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; danger?: boolean }) {
+  return (
+    <button type="button" {...p}
+      className={`h-8 min-w-8 px-2 flex items-center justify-center text-sm border-r border-blue-100 last:border-r-0 ${active ? "bg-blue-100 text-blue-700" : danger ? "text-red-600 hover:bg-red-50" : "text-blue-600 hover:bg-blue-50"} ${className}`} />
+  );
+}
+
+/** Floating bar above the selection: only controls that work for what is selected. */
+function SelectionBar({ actions, count, style }: { actions: SelectionActions; count: number; style: React.CSSProperties }) {
+  const [palette, setPalette] = useState(false);
+  const t = actions.text;
+  return (
+    <div {...stopProps} className="absolute z-[60] pointer-events-auto" style={style}>
+      <div className="flex flex-wrap items-stretch bg-white border border-blue-400 rounded-md shadow-lg overflow-hidden">
+        {count > 1 && <span className="px-2.5 flex items-center text-xs text-slate-500 border-r border-blue-100">{count} selected</span>}
+        {actions.canEdit && <TB onClick={actions.edit} title="Edit this text (or double-click it)" className="text-xs font-medium">Edit</TB>}
+        {t && <>
+          <TB onClick={() => t.size(0.9)} title="Make the text smaller" aria-label="Smaller text"><span className="text-[11px] font-semibold">A</span><span className="text-[9px]">&minus;</span></TB>
+          <TB onClick={() => t.size(1.1)} title="Make the text larger" aria-label="Larger text"><span className="text-base font-semibold leading-none">A</span><span className="text-[9px]">+</span></TB>
+          <TB active={t.bold} onClick={() => t.style({ bold: !t.bold })} title="Bold (replaces the line with a standard font)" aria-pressed={t.bold} className="font-bold">B</TB>
+          <TB active={t.italic} onClick={() => t.style({ italic: !t.italic })} title="Italic (replaces the line with a standard font)" aria-pressed={t.italic} className="italic">I</TB>
+          <select value={t.family} onChange={e => t.style({ family: e.target.value })} aria-label="Font" title="Font (replaces the line with a standard font)"
+            className="h-8 text-xs text-blue-600 bg-white border-r border-blue-100 px-1.5 focus:outline-none">
+            {!t.family && <option value="" disabled>Font</option>}
+            {FAMILIES.map(f => <option key={f}>{f}</option>)}
+          </select>
+          <TB onClick={() => setPalette(p => !p)} title="Text colour" aria-label="Text colour" aria-expanded={palette} active={palette}>
+            <Icon name="palette" />
+          </TB>
+        </>}
+        {actions.isImage && <>
+          <TB onClick={() => actions.resize(0.9)} title="Make the image 10% smaller" className="text-xs">Smaller</TB>
+          <TB onClick={() => actions.resize(1.1)} title="Make the image 10% larger" className="text-xs">Larger</TB>
+        </>}
+        <TB danger onClick={actions.del} title="Delete (Del)" aria-label="Delete"><Icon name="trash" /></TB>
+      </div>
+      {t && palette && (
+        <div className="mt-1 inline-flex gap-1.5 bg-white border border-slate-200 rounded-md shadow-lg p-1.5">
+          {SWATCHES.map(c => (
+            <button key={c} type="button" aria-label={`Colour ${c}`} onClick={() => { t.color(c); setPalette(false); }}
+              className="w-6 h-6 rounded-full border border-slate-300" style={{ background: c }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const FONTS = ["Helvetica", "Times-Roman", "Courier"];
 const MAX_IMAGE_SIDE = 2000;
@@ -48,6 +140,8 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; undoable: boolean } | null>(null);
+  useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 4000); return () => clearTimeout(t); }, [notice]);
   const [tool, setTool] = useState<Tool>("select");
   const [placement, setPlacement] = useState<Placement>(null);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
@@ -99,7 +193,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const sync = useCallback(() => setEditorState(machine.getState()), [machine]);
 
   /** Run a session mutation with busy/error handling, then refresh viewer + selection. */
-  const run = useCallback(async (label: string, op: (s: EditorSession) => Promise<string[] | void>, pageIndex: number | null) => {
+  const run = useCallback(async (label: string, op: (s: EditorSession) => Promise<string[] | void>, pageIndex: number | null, done?: string, undoable = true) => {
     const s = sessionRef.current;
     if (!s) return;
     setBusy(label);
@@ -112,6 +206,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
       setViewerFile(f);
       onFileModified(f);
       setRev(r => r + 1);
+      if (done) setNotice({ text: done, undoable });
     } catch (e) {
       setError(errMsg(e));
       setRev(r => r + 1); // session rolled back & rebuilt itself; refresh derived UI
@@ -121,14 +216,14 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     }
   }, [file.name, machine, onFileModified, sync]);
 
-  const undo = useCallback(() => run("Undoing…", async s => { await s.undo(); }, null), [run]);
-  const redo = useCallback(() => run("Redoing…", async s => { await s.redo(); }, null), [run]);
+  const undo = useCallback(() => run("Undoing…", async s => { await s.undo(); }, null, "Undone", false), [run]);
+  const redo = useCallback(() => run("Redoing…", async s => { await s.redo(); }, null, "Redone", false), [run]);
 
   const deleteSelection = useCallback(() => {
     const ids = machine.getState().selectedObjectIds;
     const p = machine.getState().activePage;
     if (!ids.length || p === null) return;
-    run("Deleting…", async s => { await s.remove(p, ids); }, p);
+    run("Deleting…", async s => { await s.remove(p, ids); }, p, ids.length > 1 ? `Deleted ${ids.length} items` : "Deleted");
   }, [machine, run]);
 
   // ---- keyboard --------------------------------------------------------------------------
@@ -171,7 +266,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
           if (e.key === "ArrowDown")  dy = -step;
           const p = st.activePage;
           const ids = [...st.selectedObjectIds];
-          run("Moving…", s => s.move(p, ids, dx, dy), p);
+          run("Moving…", s => s.move(p, ids, dx, dy), p, "Moved");
         }
         return;
       }
@@ -199,8 +294,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
 
   const startEdit = () => {
     if (!session || activePage === null || !singleRun) return;
-    const src = session.resolveSourceIds(activePage, [singleRun]);
-    const text = src.map(i => (selPage!.objects[i] as LayahTextObject).text).join(" ").trim();
+    const text = session.lineText(activePage, singleRun);
     setEditing({ value: text, warning: session.textEditWarning(activePage, singleRun) });
   };
 
@@ -215,6 +309,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
       machine.select(r.ids, p);
       commitFile(session);
       setEditing(null);
+      setNotice({ text: "Text updated", undoable: true });
     } catch (e) {
       if (e instanceof FontCoverageError) {
         setEditing({ ...editing, needsSubstitute: e.message });
@@ -235,8 +330,32 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
     if (!session || activePage === null || !singleObj) return;
     const b = singleObj.bounds;
     const to: LayahObjectBounds = { left: b.left, top: b.top, right: b.left + (b.right - b.left) * factor, bottom: b.top - (b.top - b.bottom) * factor };
-    run("Resizing…", s => s.resize(activePage, singleObj.id, to), activePage);
+    run("Resizing…", s => s.resize(activePage, singleObj.id, to), activePage, "Image resized");
   };
+
+  // Current style of the selected line (best effort from its font name); null when it is not a single text line.
+  const textInfo = (() => {
+    if (!session || activePage === null || !singleRun || !selPage) return null;
+    try {
+      const objs = session.resolveSourceIds(activePage, [singleRun]).map(i => selPage.objects[i]).filter(o => o?.type === "text") as unknown as LayahTextObject[];
+      if (!objs.length) return null;
+      const f = objs[0].fontFamily ?? "";
+      return {
+        bold: /bold|black|heavy/i.test(f) || (objs[0].fontWeight ?? 400) >= 600,
+        italic: /italic|oblique/i.test(f),
+        family: /courier|mono/i.test(f) ? "Courier" : /helvetica|arial|sans/i.test(f) ? "Helvetica" : /times|serif|georgia|garamond/i.test(f) ? "Times" : "", // "" = unknown (e.g. an embedded subset font)
+      };
+    } catch { return null; }
+  })();
+  const textActions: TextActions | null = textInfo && singleRun && activePage !== null ? {
+    ...textInfo,
+    size: f => run("Resizing text…", s => s.scale(activePage, [singleRun], f), activePage, f > 1 ? "Text larger" : "Text smaller"),
+    style: patch => {
+      const t = { ...textInfo, ...patch };
+      run("Changing font…", s => s.restyleText(activePage, singleRun, { font: fontName(t.family || "Helvetica", t.bold, t.italic) }), activePage, "Font changed");
+    },
+    color: hex => run("Changing colour…", s => s.restyleText(activePage, singleRun, { color: hexToRgb(hex) }), activePage, "Colour changed"),
+  } : null;
 
   const onPickImage = async (f: File | undefined) => {
     if (!f) return;
@@ -256,18 +375,21 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
       const pg = session!.getPage(pageIndex);
       const w = Math.min(pg.width * 0.4, pendingImage.pw), h = w * (pendingImage.ph / pendingImage.pw);
       const left = Math.max(0, Math.min(x, pg.width - w)), top = Math.min(pg.height, Math.max(h, y));
-      run("Inserting image…", s => s.addImage(pageIndex, { rgba: pendingImage.rgba, pixelWidth: pendingImage.pw, pixelHeight: pendingImage.ph, x: left, y: top - h, width: w, height: h }), pageIndex)
+      run("Inserting image…", s => s.addImage(pageIndex, { rgba: pendingImage.rgba, pixelWidth: pendingImage.pw, pixelHeight: pendingImage.ph, x: left, y: top - h, width: w, height: h }), pageIndex, "Image added")
         .then(() => { setPendingImage(null); setTool("select"); });
     } else if (tool === "rect") {
-      run("Adding rectangle…", async s => { await s.addRect(pageIndex, { x, y: y - 50, width: 120, height: 50, stroke: hexToRgb(color), strokeWidth: 2 }); }, pageIndex)
+      run("Adding rectangle…", async s => { await s.addRect(pageIndex, { x, y: y - 50, width: 120, height: 50, stroke: hexToRgb(color), strokeWidth: 2 }); }, pageIndex, "Rectangle added")
         .then(() => setTool("select"));
     }
   };
 
+  const whiteout = (pageIndex: number, r: { x: number; y: number; width: number; height: number }) =>
+    run("Adding whiteout…", async s => { await s.addRect(pageIndex, { ...r, fill: [255, 255, 255] }); }, pageIndex, "Whiteout added");
+
   const confirmNewText = () => {
     if (!placement || !newText.trim()) return;
     const { pageIndex, x, y } = placement;
-    run("Adding text…", s => s.addText(pageIndex, { text: newText, x, y: y - size, fontSize: size, fontFamily: font, color: hexToRgb(color) }), pageIndex)
+    run("Adding text…", s => s.addText(pageIndex, { text: newText, x, y: y - size, fontSize: size, fontFamily: font, color: hexToRgb(color) }), pageIndex, "Text added")
       .then(() => { setPlacement(null); setNewText(""); setTool("select"); });
   };
 
@@ -283,75 +405,91 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   }
 
   const btn = "px-3 py-1.5 rounded-md text-sm font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-  const toolBtn = (t: Tool, label: string, onClick?: () => void) => (
-    <button key={t} onClick={onClick ?? (() => { setTool(t); setPlacement(null); })} disabled={!!busy}
-      className={`${btn} ${tool === t ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
-  );
   const input = "border border-slate-200 rounded-md px-2 py-1.5 text-sm bg-white";
+  const seg = (active: boolean) => `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-r border-slate-200 last:border-r-0 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${active ? "bg-blue-50 text-blue-700" : "bg-white text-slate-700 hover:bg-slate-50"}`;
   const textRunOnly = !!singleRun;
-  const hint =
-    tool === "text" ? (placement ? "" : "Click on the page where the text should go.") :
-    tool === "image" ? (pendingImage ? `Click on the page to place “${pendingImage.name}”.` : "") :
-    tool === "rect" ? "Click on the page to place an outline rectangle (it can be undone, but not selected afterwards)." : "";
+  const modes: [Tool, string, string][] = [
+    ["select", "Select", "Select, move and edit what is already on the page"],
+    ["text", "Text", "Add new text"],
+    ["image", "Image", "Add an image from your computer"],
+    ["whiteout", "Whiteout", "Cover part of the page with white"],
+    ["rect", "Rectangle", "Draw an outline rectangle"],
+  ];
+  const pickMode = (t: Tool) => {
+    setPlacement(null); setEditing(null);
+    if (t === "image") { fileInput.current?.click(); return; }
+    setPendingImage(null); setTool(t);
+  };
+  const hint = tool === "image" && pendingImage ? `Click on the page to place "${pendingImage.name}".` : HINTS[tool];
+  const cancelImage = tool === "image" && pendingImage;
+
+  const editUi = editing && (
+    <div className="w-full">
+      <input autoFocus className={`${input} w-full shadow-lg ring-2 ring-blue-300`} value={editing.value} aria-label="New text"
+        onChange={e => setEditing({ ...editing, value: e.target.value, needsSubstitute: undefined })}
+        onKeyDown={e => { if (e.key === "Enter") applyEdit(); else if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 bg-white border border-slate-200 rounded-md shadow-lg p-1.5">
+        <button className={`${btn} bg-blue-600 text-white border-blue-600 hover:bg-blue-700`} disabled={!!busy} onClick={() => applyEdit()}>Apply</button>
+        {editing.needsSubstitute && <button className={`${btn} bg-white border-amber-400 text-amber-900`} disabled={!!busy} onClick={() => applyEdit(true)}>Use Helvetica instead</button>}
+        <button className={`${btn} bg-white border-slate-200`} onClick={() => setEditing(null)}>Cancel</button>
+        <span className="text-xs text-slate-500 px-1">Enter to apply · Esc to cancel</span>
+      </div>
+      {(editing.needsSubstitute || editing.warning) && (
+        <p className="mt-1 max-w-sm rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs p-2 shadow">
+          {editing.needsSubstitute ? `${editing.needsSubstitute} Nothing was changed. You can replace the line with Helvetica at the same position and size, but the look will differ from the original font.` : editing.warning}
+        </p>
+      )}
+    </div>
+  );
+
+  const placeUi = tool === "text" && placement && (
+    <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-2 w-[min(25rem,calc(100vw-2rem))] flex flex-col gap-2">
+      <input ref={newTextInput} className={`${input} w-full`} value={newText} placeholder="Type your text…" aria-label="New text"
+        onChange={e => setNewText(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") confirmNewText(); else if (e.key === "Escape") { e.stopPropagation(); setPlacement(null); } }} />
+      <div className="flex items-center gap-2">
+        <select className={`${input} min-w-0 flex-1`} value={font} onChange={e => setFont(e.target.value)} aria-label="Font">{FONTS.map(f => <option key={f}>{f}</option>)}</select>
+        <input className={`${input} w-16`} type="number" min={4} max={200} value={size} onChange={e => setSize(Math.max(4, Math.min(200, Number(e.target.value) || 12)))} aria-label="Font size" />
+        <input type="color" value={color} onChange={e => setColor(e.target.value)} aria-label="Colour" className="h-8 w-9 shrink-0 border border-slate-200 rounded" />
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <span className="mr-auto text-xs text-slate-500">Enter to add · Esc to cancel</span>
+        <button className={`${btn} bg-white border-slate-200`} onClick={() => setPlacement(null)}>Cancel</button>
+        <button className={`${btn} bg-blue-600 text-white border-blue-600 hover:bg-blue-700`} disabled={!newText.trim() || !!busy} onClick={confirmNewText}>Add</button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="bg-white border-b border-slate-200 px-4 py-2 flex flex-wrap items-center gap-2 shrink-0">
-        {toolBtn("select", "Select")}
-        {toolBtn("text", "Add text")}
-        {toolBtn("image", "Add image", () => fileInput.current?.click())}
-        {toolBtn("rect", "Rectangle")}
-        <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => onPickImage(e.target.files?.[0])} />
-        <span className="w-px h-5 bg-slate-200 mx-1" />
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !session.canUndo} onClick={undo} title="Undo (Ctrl+Z)">Undo</button>
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)">Redo</button>
-        <span className="w-px h-5 bg-slate-200 mx-1" />
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !textRunOnly} onClick={startEdit} title={textRunOnly ? "Edit the selected line of text" : "Select a single line of text to edit it"}>Edit text</button>
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !selected.length} onClick={deleteSelection} title="Delete selected (Del / Backspace). Arrow keys nudge, Shift+Arrow for 10pt. Ctrl+A selects all.">Delete</button>
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !singleObj || singleObj.type !== "image"} onClick={() => resizeSelection(0.9)} title="Make the selected image 10% smaller">Smaller</button>
-        <button className={`${btn} bg-white border-slate-200 text-slate-700 hover:bg-slate-50`} disabled={!!busy || !singleObj || singleObj.type !== "image"} onClick={() => resizeSelection(1.1)} title="Make the selected image 10% larger">Larger</button>
-        <div className="ml-auto flex items-center gap-3">
-          {busy && <span className="text-sm text-slate-500 animate-pulse" role="status">{busy}</span>}
-          <button className={`${btn} bg-blue-600 text-white border-blue-600 hover:bg-blue-700`} disabled={!!busy} onClick={() => downloadBytes(session.bytes, file.name.replace(/\.pdf$/i, "") + "-edited.pdf")}>Download PDF</button>
+      <div className="bg-white border-b border-slate-200 px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 shrink-0">
+        <div className="inline-flex border border-slate-200 rounded-md overflow-hidden" role="toolbar" aria-label="Edit tools">
+          {modes.map(([t, label, tip]) => (
+            <button key={t} className={seg(tool === t)} disabled={!!busy} title={tip} aria-pressed={tool === t} onClick={() => pickMode(t)}>
+              <Icon name={t} /><span className="hidden sm:inline">{label}</span>
+            </button>
+          ))}
         </div>
+        <div className="inline-flex border border-slate-200 rounded-md overflow-hidden">
+          <button className={seg(false)} disabled={!!busy || !session.canUndo} onClick={undo} title="Undo (Ctrl+Z)"><Icon name="undo" /><span className="hidden sm:inline">Undo</span></button>
+          <button className={seg(false)} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /><span className="hidden sm:inline">Redo</span></button>
+        </div>
+        <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => onPickImage(e.target.files?.[0])} />
+        {busy ? <span className="text-sm text-slate-500 animate-pulse" role="status">{busy}</span> : (
+          <span className="text-xs text-slate-500 min-w-0 basis-full sm:basis-0 sm:flex-1 truncate" title={hint}>
+            {hint}
+            {cancelImage && <button className="underline ml-2" onClick={() => { setPendingImage(null); setTool("select"); }}>Cancel</button>}
+          </span>
+        )}
       </div>
 
-      {(tool === "text" || tool === "rect") && (
-        <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap items-center gap-2 shrink-0 text-sm">
-          {tool === "text" && <>
-            <select className={input} value={font} onChange={e => setFont(e.target.value)} aria-label="Font">{FONTS.map(f => <option key={f}>{f}</option>)}</select>
-            <input className={`${input} w-20`} type="number" min={4} max={200} value={size} onChange={e => setSize(Math.max(4, Math.min(200, Number(e.target.value) || 12)))} aria-label="Font size" />
-          </>}
-          <input type="color" value={color} onChange={e => setColor(e.target.value)} aria-label="Colour" className="h-8 w-10 border border-slate-200 rounded" />
-          {tool === "text" && placement && <>
-            <input ref={newTextInput} className={`${input} flex-1 min-w-[12rem]`} value={newText} placeholder="Type the text…" onChange={e => setNewText(e.target.value)} onKeyDown={e => e.key === "Enter" && confirmNewText()} />
-            <button className={`${btn} bg-blue-600 text-white border-blue-600`} disabled={!newText.trim() || !!busy} onClick={confirmNewText}>Add</button>
-            <button className={`${btn} bg-white border-slate-200`} onClick={() => setPlacement(null)}>Cancel</button>
-          </>}
-          {hint && <span className="text-slate-600">{hint}</span>}
-        </div>
-      )}
-      {tool === "image" && pendingImage && <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 text-sm text-slate-600 shrink-0">{hint} <button className="underline ml-2" onClick={() => { setPendingImage(null); setTool("select"); }}>Cancel</button></div>}
-
-      {editing && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 shrink-0 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <input autoFocus className={`${input} flex-1 min-w-[12rem]`} value={editing.value} onChange={e => setEditing({ ...editing, value: e.target.value, needsSubstitute: undefined })} onKeyDown={e => e.key === "Enter" && applyEdit()} aria-label="New text" />
-            <button className={`${btn} bg-blue-600 text-white border-blue-600`} disabled={!!busy} onClick={() => applyEdit()}>Apply</button>
-            {editing.needsSubstitute && <button className={`${btn} bg-white border-amber-400 text-amber-900`} disabled={!!busy} onClick={() => applyEdit(true)}>Use Helvetica instead</button>}
-            <button className={`${btn} bg-white border-slate-200`} onClick={() => setEditing(null)}>Cancel</button>
+      <div className="flex-1 min-h-0 relative">
+        {error && (
+          <div role="alert" className="absolute top-0 inset-x-0 z-[60] bg-red-50 border-b border-red-200 text-red-800 px-4 py-2 text-sm flex items-start justify-between gap-4 shadow">
+            <span>{error}</span><button className="underline" onClick={() => setError(null)}>Dismiss</button>
           </div>
-          <p className="mt-1 text-amber-900">{editing.needsSubstitute ? `${editing.needsSubstitute} Nothing was changed. You can replace the line with Helvetica at the same position and size, but the look will differ from the original font.` : editing.warning}</p>
-        </div>
-      )}
+        )}
 
-      {error && (
-        <div role="alert" className="bg-red-50 border-b border-red-200 text-red-800 px-4 py-2 text-sm flex items-start justify-between gap-4 shrink-0">
-          <span>{error}</span><button className="underline" onClick={() => setError(null)}>Dismiss</button>
-        </div>
-      )}
-
-      <div className="flex-1 min-h-0">
         <PdfViewer
           file={viewerFile}
           viewMode="scroll"
@@ -369,10 +507,29 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
               placing={tool === "text" ? placement : null}
               disabled={!!busy}
               onPlace={place}
-              onMove={(p, ids, dx, dy) => run("Moving…", s => s.move(p, ids, dx, dy), p)}
+              onWhiteout={whiteout}
+              onMove={(p, ids, dx, dy) => run("Moving…", s => s.move(p, ids, dx, dy), p, "Moved")}
+              actions={{ canEdit: textRunOnly, isImage: singleObj?.type === "image", edit: startEdit, del: deleteSelection, resize: resizeSelection, text: textActions }}
+              editUi={editUi || null}
+              placeUi={placeUi || null}
             />
           )}
         />
+        <div className={`absolute bottom-5 left-0 right-0 flex-col items-center gap-2 pointer-events-none z-[60] ${placement || editing ? "hidden" : "flex"}`}>
+          {notice && (
+            <div role="status" className="pointer-events-auto bg-slate-900 text-white text-sm rounded-full px-4 py-1.5 shadow-lg flex items-center gap-3">
+              {notice.text}
+              {notice.undoable && session.canUndo && <button className="underline text-blue-200 hover:text-white" onClick={undo}>Undo</button>}
+            </div>
+          )}
+          <div className="pointer-events-auto bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2 shadow-lg flex items-center gap-3">
+            <button className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-semibold text-sm rounded-md px-4 py-2" disabled={!!busy}
+              onClick={() => { downloadBytes(session.bytes, file.name.replace(/\.pdf$/i, "") + "-edited.pdf"); setNotice({ text: "Downloaded. Your original file is unchanged.", undoable: false }); }}>
+              Download edited PDF
+            </button>
+            <span className="text-xs text-amber-900 hidden sm:inline">Edits apply as you go · Ctrl+Z to undo</span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -391,14 +548,19 @@ function useElementSize(ref: React.RefObject<HTMLElement | null>) {
   return size;
 }
 
-function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync, tool, placing, disabled, onPlace, onMove }: {
+function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync, tool, placing, disabled, onPlace, onWhiteout, onMove, actions, editUi, placeUi }: {
   pageIndex: number; session: EditorSession; rev: number; machine: InteractionStateMachine; editorState: LayahEditorState;
   sync: () => void; tool: Tool; placing: Placement; disabled: boolean;
   onPlace: (pageIndex: number, x: number, y: number) => void;
+  onWhiteout: (pageIndex: number, r: { x: number; y: number; width: number; height: number }) => void;
   onMove: (pageIndex: number, ids: string[], dx: number, dy: number) => void;
+  actions: SelectionActions;
+  editUi: React.ReactNode;
+  placeUi: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useElementSize(ref);
+  const [wo, setWo] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   void rev;
   const page = pageOf(session, pageIndex);
   if (!page) return null;
@@ -418,22 +580,36 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const onPointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
     const pt = toPdf(e);
+    if (tool === "whiteout") {
+      setWo({ a: pt, b: pt });
+      try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer */ }
+      return;
+    }
     if (tool !== "select") { onPlace(pageIndex, pt.x, pt.y); return; }
     gestureDown(machine, page, pt, e.shiftKey);
     sync();
     try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer: dragging still works without capture */ }
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (wo) { setWo({ ...wo, b: toPdf(e) }); return; }
     if (gestureMove(machine, pageIndex, toPdf(e), ctx.zoom)) sync();
   };
   const onPointerUp = (e: React.PointerEvent) => {
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+    if (wo) {
+      const x = Math.min(wo.a.x, wo.b.x), y = Math.min(wo.a.y, wo.b.y);
+      const width = Math.abs(wo.a.x - wo.b.x), height = Math.abs(wo.a.y - wo.b.y);
+      setWo(null);
+      if (width >= 4 && height >= 4) onWhiteout(pageIndex, { x, y, width, height });
+      return;
+    }
     const intent = gestureUp(machine, page, e.shiftKey, ctx.zoom);
     sync();
     if (intent?.type === "move") onMove(pageIndex, intent.objectIds, intent.deltaX, intent.deltaY);
   };
   // pointercancel and lostpointercapture abandon the gesture: they must never commit a move.
   const onPointerAbort = () => {
+    if (tool !== "select") { setWo(null); return; }
     gestureCancel(machine, pageIndex);
     sync();
   };
@@ -491,7 +667,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     <div
       ref={ref}
       data-testid={`editor-overlay-${pageIndex}`}
-      className={`absolute inset-0 z-50 touch-none ${
+      className={`absolute inset-0 z-50 ${tool === "whiteout" || (tool === "select" && mine && editorState.selectedObjectIds.length > 0) ? "touch-none" : "touch-pan-y"} ${
         tool === "select"
           ? editorState.phase === "dragging"
             ? "cursor-grabbing"
@@ -503,6 +679,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerAbort}
       onLostPointerCapture={onPointerAbort}
+      onDoubleClick={() => { if (tool === "select" && !disabled && actions.canEdit && mine) actions.edit(); }}
     >
       <SelectionOverlay
         selectedObjectBounds={selectedBounds}
@@ -512,6 +689,33 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         dragDeltaPt={dragPt}
       />
       {marker && <div className="absolute bg-blue-600 pointer-events-none" style={{ left: marker.left, top: marker.top, width: 2, height: marker.bottom - marker.top }} />}
+      {wo && (() => {
+        const r = pdfToViewportBounds({ left: Math.min(wo.a.x, wo.b.x), right: Math.max(wo.a.x, wo.b.x), bottom: Math.min(wo.a.y, wo.b.y), top: Math.max(wo.a.y, wo.b.y) }, ctx);
+        return <div className="absolute border border-blue-500 border-dashed bg-white/70 pointer-events-none" style={{ left: r.left, top: r.top, width: r.right - r.left, height: r.bottom - r.top }} />;
+      })()}
+
+      {/* Floating UI. Pointer events stop here so pressing a control never starts a select/drag gesture. */}
+      {(() => {
+        const stop = { onPointerDown: (e: React.PointerEvent) => e.stopPropagation(), onPointerUp: (e: React.PointerEvent) => e.stopPropagation(), onDoubleClick: (e: React.MouseEvent) => e.stopPropagation() };
+        const anchor = group ?? selectedBounds[0]?.bounds ?? null;
+        const clampLeft = (left: number, width: number) => Math.max(0, Math.min(left, size.width - width));
+        return <>
+          {anchor && !disabled && editorState.phase === "idle" && !(editUi && selectedBounds.length === 1) && (
+            <SelectionBar actions={actions} count={selectedBounds.length}
+              style={{ left: clampLeft(anchor.left, Math.min(size.width, 330)), maxWidth: Math.max(size.width, 220), ...(anchor.top < 60 ? { top: anchor.bottom + 6 } : { top: anchor.top - 6, transform: "translateY(-100%)" }) }} />
+          )}
+          {editUi && selectedBounds.length === 1 && (
+            <div {...stop} className="absolute z-[60] pointer-events-auto" style={{ left: clampLeft(selectedBounds[0].bounds.left - 4, 260), top: Math.max(2, selectedBounds[0].bounds.top - 4), width: Math.max(selectedBounds[0].bounds.right - selectedBounds[0].bounds.left + 24, 260) }}>
+              {editUi}
+            </div>
+          )}
+          {placeUi && marker && (
+            <div {...stop} className="absolute z-[60] pointer-events-auto" style={{ left: clampLeft(marker.left, 400), top: marker.bottom + 6 }}>
+              {placeUi}
+            </div>
+          )}
+        </>;
+      })()}
     </div>
   );
 }

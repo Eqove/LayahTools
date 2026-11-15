@@ -13,6 +13,8 @@ export interface EditorEngine {
   inspectPage(pageIndex: number): Promise<PdfPageInfo>;
   getEditableObjects(pageIndex: number): Promise<PdfPageObject[]>;
   getFillColor(objectId: string): [number, number, number] | null;
+  /** Recolours an existing object's fill ([r,g,b] 0-255) without touching its font or geometry. */
+  setFillColor(pageIndex: number, objectId: string, color: [number, number, number]): Promise<void>;
   replaceText(pageIndex: number, objectId: string, newText: string): Promise<void>;
   moveObject(pageIndex: number, objectId: string, deltaX: number, deltaY: number): Promise<void>;
   transformObject(pageIndex: number, objectId: string, transform: PdfTransform): Promise<void>;

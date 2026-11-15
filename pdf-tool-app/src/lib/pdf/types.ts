@@ -15,8 +15,6 @@ export type PdfToolId =
   | "pdf-to-image"
   | "extract-text"
   | "analyze-structure"
-  | "pdf-to-word"
-  | "pdf-to-excel"
   | "extract-tables"
   | "crop"
   | "metadata"

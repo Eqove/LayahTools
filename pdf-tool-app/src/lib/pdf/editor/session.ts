@@ -169,6 +169,25 @@ export class EditorSession {
     return this.layoutIdsIn(pageIndex, sourceIds);
   }
 
+  /**
+   * Reading-order text of a run/line. Pieces of one line are joined without a space unless there is a visible gap
+   * between them (PDFs often split a word like "P" + "aper" into separate objects).
+   */
+  lineText(pageIndex: number, id: string): string {
+    this.checkPage(pageIndex);
+    const page = this.cur.store.getPage(pageIndex)!;
+    const objs = this.resolve(pageIndex, [id]).map(s => page.objects[s]).filter((o): o is LayahTextObject => o?.type === "text");
+    let out = "";
+    let prev: LayahTextObject | undefined;
+    for (const o of objs) {
+      const gap = prev ? o.bounds.left - prev.bounds.right : 0;
+      if (prev && gap > (o.fontSize ?? 12) * 0.15 && !/\s$/.test(out) && !/^\s/.test(o.text)) out += " ";
+      out += o.text;
+      prev = o;
+    }
+    return out.trim();
+  }
+
   /** Honest pre-edit warning for the text editing UI, or null if none applies. */
   textEditWarning(pageIndex: number, id: string): string | null {
     this.checkPage(pageIndex);
@@ -249,6 +268,68 @@ export class EditorSession {
       );
       const hit = Object.values(this.cur.store.getPage(pageIndex)!.objects).find((o): o is LayahTextObject => o.type === "text" && o.text.trim() === text.trim() && near(o));
       return { ids: hit ? this.layoutIdsIn(pageIndex, [hit.id]) : [], substituted: false };
+    });
+  }
+
+  /**
+   * Scale text (or any objects) uniformly about the group's bottom-left corner, e.g. 1.1 = 10% larger.
+   * Glyphs and spacing scale together, so the line keeps its look.
+   */
+  scale(pageIndex: number, ids: string[], factor: number): Promise<string[]> {
+    return this.enqueue(async () => {
+      const src = this.prepare(pageIndex, ids);
+      this.finite({ factor });
+      if (factor < 0.25 || factor > 4) throw this.err("INVALID_ARGUMENT", "Scale factor must be between 0.25 and 4.", { param: "factor", value: factor });
+      const page = this.cur.store.getPage(pageIndex)!;
+      const L = Math.min(...src.map(s => page.objects[s].bounds.left));
+      const B = Math.min(...src.map(s => page.objects[s].bounds.bottom));
+      await this.transact(async () => {
+        for (const s of src) await this.engine.transformObject(pageIndex, this.ptr(s), { a: factor, b: 0, c: 0, d: factor, e: L * (1 - factor), f: B * (1 - factor) });
+      });
+      return this.layoutIdsAfter(pageIndex, src);
+    });
+  }
+
+  /**
+   * Restyle one line of text.
+   * - `color` only: recolours the existing text objects in place (font untouched).
+   * - `font` (a standard-14 name such as "Times-Bold"): replaces the line with that font at the same position, size and
+   *   colour. The look can differ from the original font; if the new font cannot show every character the edit is
+   *   rolled back and a FontCoverageError is thrown.
+   */
+  restyleText(pageIndex: number, id: string, style: { font?: string; color?: [number, number, number] }): Promise<string[]> {
+    return this.enqueue(async () => {
+      this.readyPage(pageIndex);
+      if (!style.font && !style.color) throw this.err("NOTHING_TO_DO", "No style change requested.");
+      const page = this.cur.store.getPage(pageIndex)!;
+      const src = this.resolve(pageIndex, [id]).filter(s => page.objects[s]?.type === "text");
+      if (!src.length) throw this.err("NOTHING_TO_DO", "Selection contains no editable text.");
+      const first = page.objects[src[0]] as LayahTextObject;
+
+      if (!style.font) {
+        await this.transact(async () => { for (const s of src) await this.engine.setFillColor(pageIndex, this.ptr(s), style.color!); });
+        return this.layoutIdsAfter(pageIndex, src);
+      }
+
+      const text = this.lineText(pageIndex, id);
+      const size = first.fontSize ?? 12;
+      const color = style.color ?? this.engine.getFillColor(this.ptr(src[0])) ?? [0, 0, 0];
+      const near = (o: LayahSourceObject) => Math.abs(o.bounds.left - first.bounds.left) < 2 && Math.abs(o.bounds.bottom - first.bounds.bottom) < Math.max(4, size);
+      await this.transact(
+        async () => {
+          for (const s of src) { await this.engine.deleteObject(pageIndex, this.ptr(s)); this.cur.ptrs.delete(s); }
+          await this.engine.addText(pageIndex, { text, x: first.bounds.left, y: first.bounds.bottom + size * 0.2, fontSize: size, fontFamily: style.font, color });
+        },
+        store => {
+          const objs = Object.values(store.getPage(pageIndex)!.objects).filter((o): o is LayahTextObject => o.type === "text" && near(o));
+          if (objs.some(o => o.text.trim() === text)) return;
+          const got = new Set(objs.map(o => o.text).join(""));
+          const lost = [...new Set(text)].filter(c => c.trim() && !got.has(c));
+          throw this.err("FONT_COVERAGE", `Couldn't switch the font: ${style.font} can't show ${lost.length ? lost.join(" ") : "every character"} in this line (or the line's text couldn't be read back exactly). Nothing was changed.`, { font: style.font, missing: lost });
+        }
+      );
+      const last = Object.values(this.cur.store.getPage(pageIndex)!.objects).filter((o): o is LayahTextObject => o.type === "text" && near(o)).pop();
+      return last ? this.layoutIdsIn(pageIndex, [last.id]) : [];
     });
   }
 
