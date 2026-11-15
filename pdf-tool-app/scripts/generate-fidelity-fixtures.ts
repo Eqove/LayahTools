@@ -190,10 +190,36 @@ async function buildAnnotationsMarkup(): Promise<Uint8Array> {
   return doc.save({ useObjectStreams: false });
 }
 
+/** Annotation kinds not in annotations-markup.pdf, with author (/T), opacity (/CA), border (/BS) and date (/M) set. */
+async function buildAnnotationsMatrix(): Promise<Uint8Array> {
+  const doc = await newDoc();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = [doc.addPage([595, 842]), doc.addPage([595, 842]), doc.addPage([595, 842])];
+  pages.forEach((pg, i) => pg.drawText(`Matrix fixture page ${i + 1}`, { x: 50, y: 790, size: 16, font }));
+  const meta = { T: S("Reviewer A"), M: S("D:20260101000000Z"), CA: 0.5 };
+
+  const sq: Rect = [48, 700, 300, 718];
+  addAnnot(doc, 0, { Subtype: "Squiggly", NM: S("sg-1"), C: [1, 0, 1], QuadPoints: quad(sq), ...meta }, sq, "1 0 1 RG 1 w 0 2 m 60 6 l 120 2 l 180 6 l 252 2 l S");
+  addAnnot(doc, 0, { Subtype: "Circle", NM: S("ci-1"), C: [0, 0.5, 1], BS: { W: 3 }, ...meta }, [320, 680, 400, 740], "0 0.5 1 RG 3 w 4 4 72 52 re S");
+  addAnnot(doc, 0, { Subtype: "Line", NM: S("ln-1"), C: [0, 0, 0], L: [60, 600, 260, 640], BS: { W: 2 }, ...meta }, [55, 595, 265, 645], "0 0 0 RG 2 w 5 5 m 205 45 l S");
+  addAnnot(doc, 0, { Subtype: "Stamp", NM: S("st-1"), Name: "Approved", ...meta }, [320, 580, 420, 620], "0 0.6 0 RG 2 w 1 1 98 38 re S");
+  addAnnot(doc, 0, { Subtype: "Text", NM: S("tx-1"), Name: "Note", Contents: S("no-rotate note"), C: [1, 0.8, 0], F: 28, ...meta }, [450, 700, 470, 720], "1 0.8 0 rg 0 0 20 20 re f");
+  addAnnot(doc, 0, { Subtype: "FreeText", NM: S("ft-2"), Contents: S("Typed text"), DA: "/Helv 10 Tf 0 g", C: [1, 1, 1], BS: { W: 1 }, ...meta }, [60, 500, 220, 540], "1 1 1 rg 0 0 160 40 re f 0 0 0 RG 1 w 0.5 0.5 159 39 re S");
+  // Internal link: page 1 -> page 3 (the target is a page object, so copying can break it).
+  addAnnot(doc, 0, { Subtype: "Link", NM: S("lk-goto"), Border: [0, 0, 2], Dest: [pages[2].ref, "XYZ", 0, 800, 0] }, [50, 430, 200, 450]);
+
+  pages[1].drawText("Reviewer:", { x: 50, y: 700, size: 12, font });
+  doc.getForm().createTextField("matrix.field").addToPage(pages[1], { x: 120, y: 692, width: 200, height: 22 });
+
+  addAnnot(doc, 2, { Subtype: "Square", NM: S("sq-3"), C: [0.8, 0.4, 0], BS: { W: 4 }, ...meta }, [100, 600, 220, 680], "0.8 0.4 0 RG 4 w 2 2 116 76 re S");
+  return doc.save({ useObjectStreams: false });
+}
+
 async function main() {
   const built: { name: string; bytes: Uint8Array }[] = [
     { name: "form-all-fields.pdf", bytes: await buildFormAllFields() },
     { name: "annotations-markup.pdf", bytes: await buildAnnotationsMarkup() },
+    { name: "annotations-matrix.pdf", bytes: await buildAnnotationsMatrix() },
   ];
   for (const b of built) fs.writeFileSync(path.join(CORPUS_DIR, b.name), b.bytes);
 
@@ -220,6 +246,15 @@ async function main() {
       hasForms: true,
       formFields: ["reviewer.name"],
       annotationSubtypes: ["Highlight", "Underline", "StrikeOut", "Text", "Popup", "Ink", "FreeText", "Square", "Link", "Widget"],
+      isEncrypted: false,
+    }),
+    entry("PDF-13", "annotations-matrix.pdf", "annotations", 3, {
+      hasTextLayer: true,
+      hasImages: false,
+      hasAnnotations: true,
+      hasForms: true,
+      formFields: ["matrix.field"],
+      annotationSubtypes: ["Squiggly", "Circle", "Line", "Stamp", "Text", "FreeText", "Link", "Widget", "Square"],
       isEncrypted: false,
     }),
   ];

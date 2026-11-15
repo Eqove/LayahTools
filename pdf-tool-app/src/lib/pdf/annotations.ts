@@ -1,5 +1,6 @@
 import {
   PDFArray,
+  decodePDFRawStream,
   PDFDict,
   PDFDocument,
   PDFHexString,
@@ -15,8 +16,8 @@ import {
 /**
  * Read-only annotation inspection and comparison (pdf-lib). It reads annotation dictionaries; it does not render them.
  *
- * Not inspected (documented limits): appearance-stream content, rich text (/RC), popup geometry, replies (/IRT),
- * annotation actions other than a URI. Pixel-level changes are covered by the render diff in the regression harness.
+ * Not inspected (documented limits): rich text (/RC), popup geometry, replies (/IRT), named destinations, actions other
+ * than URI/GoTo. Appearance streams are hashed (decoded bytes), not interpreted. Pixel-level changes are covered by the render diff in the regression harness.
  */
 
 export type AnnotationRect = [number, number, number, number];
@@ -41,6 +42,23 @@ export interface AnnotationInfo {
   uri: string | null;
   /** Fully qualified AcroForm field name for widgets. */
   fieldName: string | null;
+  /** /T author of a markup annotation (null for widgets, where /T is the field name). */
+  author: string | null;
+  /** /CA constant opacity, or null when unset (viewers treat that as 1). */
+  opacity: number | null;
+  /** /BS /W, else /Border[2], or null. */
+  borderWidth: number | null;
+  /** /M modification date string as stored. */
+  modified: string | null;
+  // Report-only (not in COMPARED): structural checks used by the A-4.4 preservation matrix.
+  /** FNV-1a hash of the decoded /AP /N stream content, or null. */
+  appearanceDigest: string | null;
+  /** /P is absent or points at the page whose /Annots holds this annotation. */
+  pageRefOk: boolean;
+  /** Target page index of a GoTo link (/Dest or /A /D array); -1 when the target is not a page of this document. */
+  destPage: number | null;
+  /** Widgets only: reachable from /AcroForm /Fields (false = the field is detached and no longer interactive). */
+  inAcroForm: boolean | null;
 }
 
 export interface AnnotationInspection {
@@ -82,7 +100,40 @@ function fieldNameOf(dict: PDFDict): string | null {
   return parts.length ? parts.join(".") : null;
 }
 
-function describe(dict: PDFDict, pageIndex: number, index: number): AnnotationInfo {
+/** Hash of the decoded appearance content, so a re-encode (different filter or compression) is not a change. */
+function digestOf(stream: PDFRawStream): string | null {
+  try {
+    return fnv(decodePDFRawStream(stream).decode());
+  } catch {
+    return fnv(stream.getContents());
+  }
+}
+
+function fnv(bytes: Uint8Array): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, "0");
+}
+
+interface DocContext {
+  pageRefs: PDFRef[];
+  pageRef: PDFRef;
+  ownRef: PDFRef | null;
+  formRefs: Set<string>;
+}
+
+function destPageOf(dict: PDFDict, ctx: DocContext): number | null {
+  let dest = dict.lookup(PDFName.of("Dest"));
+  const action = dict.lookupMaybe(PDFName.of("A"), PDFDict);
+  if (!dest && action && action.lookup(PDFName.of("S")) === PDFName.of("GoTo")) dest = action.lookup(PDFName.of("D"));
+  if (!(dest instanceof PDFArray) || dest.size() === 0) return null; // named destinations are not resolved
+  const target = dest.get(0);
+  if (target instanceof PDFNumber) return target.asNumber(); // remote-style page number
+  if (!(target instanceof PDFRef)) return -1;
+  return ctx.pageRefs.findIndex((r) => r === target);
+}
+
+function describe(dict: PDFDict, pageIndex: number, index: number, ctx: DocContext): AnnotationInfo {
   const rectNums = numbers(dict.lookup(PDFName.of("Rect")));
   const rect = rectNums && rectNums.length === 4 ? ([round(rectNums[0]), round(rectNums[1]), round(rectNums[2]), round(rectNums[3])] as AnnotationRect) : null;
   const quads = numbers(dict.lookup(PDFName.of("QuadPoints")));
@@ -97,6 +148,13 @@ function describe(dict: PDFDict, pageIndex: number, index: number): AnnotationIn
   const action = dict.lookupMaybe(PDFName.of("A"), PDFDict);
   const color = numbers(dict.lookup(PDFName.of("C")));
   const subtype = dict.lookup(PDFName.of("Subtype"));
+  const isWidget = subtype === PDFName.of("Widget");
+  const n = ap instanceof PDFDict ? ap.lookup(PDFName.of("N")) : undefined;
+  const ca = dict.lookup(PDFName.of("CA"));
+  const bs = dict.lookupMaybe(PDFName.of("BS"), PDFDict);
+  const bsW = bs?.lookup(PDFName.of("W"));
+  const border = numbers(dict.lookup(PDFName.of("Border")));
+  const p = dict.get(PDFName.of("P"));
   return {
     pageIndex,
     index,
@@ -112,7 +170,32 @@ function describe(dict: PDFDict, pageIndex: number, index: number): AnnotationIn
     hasPopup: dict.lookup(PDFName.of("Popup")) instanceof PDFDict,
     uri: action ? text(action.lookup(PDFName.of("URI"))) : null,
     fieldName: fieldNameOf(dict),
+    author: isWidget ? null : text(dict.lookup(PDFName.of("T"))),
+    opacity: ca instanceof PDFNumber ? round(ca.asNumber()) : null,
+    borderWidth: bsW instanceof PDFNumber ? round(bsW.asNumber()) : border && border.length >= 3 ? round(border[2]) : null,
+    modified: text(dict.lookup(PDFName.of("M"))),
+    appearanceDigest: n instanceof PDFRawStream ? digestOf(n) : null,
+    pageRefOk: p === undefined || p === ctx.pageRef,
+    destPage: destPageOf(dict, ctx),
+    inAcroForm: isWidget ? !!ctx.ownRef && ctx.formRefs.has(ctx.ownRef.toString()) : null,
   };
+}
+
+/** Every object reachable from /AcroForm /Fields through /Kids (widgets merged with their field included). */
+function acroFormRefs(doc: PDFDocument): Set<string> {
+  const out = new Set<string>();
+  const acro = doc.catalog.lookupMaybe(PDFName.of("AcroForm"), PDFDict);
+  const walk = (arr: PDFArray | undefined, depth: number) => {
+    if (!arr || depth > 32) return;
+    for (let i = 0; i < arr.size(); i++) {
+      const ref = arr.get(i);
+      if (!(ref instanceof PDFRef) || out.has(ref.toString())) continue;
+      out.add(ref.toString());
+      walk(doc.context.lookupMaybe(ref, PDFDict)?.lookupMaybe(PDFName.of("Kids"), PDFArray), depth + 1);
+    }
+  };
+  walk(acro?.lookupMaybe(PDFName.of("Fields"), PDFArray), 0);
+  return out;
 }
 
 /** Lists every annotation per page. Throws when the PDF cannot be opened (corrupt or encrypted): never returns a false "0". */
@@ -121,6 +204,8 @@ export async function inspectAnnotations(bytes: Uint8Array | ArrayBuffer): Promi
   const pages: AnnotationInfo[][] = [];
   const byType: Record<string, number> = {};
   let dangling = 0;
+  const pageRefs = doc.getPages().map((p) => p.ref);
+  const formRefs = acroFormRefs(doc);
   doc.getPages().forEach((page, pageIndex) => {
     const list: AnnotationInfo[] = [];
     const annots = page.node.lookup(PDFName.of("Annots"));
@@ -132,7 +217,7 @@ export async function inspectAnnotations(bytes: Uint8Array | ArrayBuffer): Promi
           dangling++;
           continue;
         }
-        const info = describe(dict, pageIndex, i);
+        const info = describe(dict, pageIndex, i, { pageRefs, pageRef: page.ref, ownRef: entry instanceof PDFRef ? entry : null, formRefs });
         list.push(info);
         byType[info.subtype] = (byType[info.subtype] ?? 0) + 1;
       }
@@ -167,7 +252,7 @@ export interface CompareOptions {
   pageMap?: (number | null)[];
 }
 
-const COMPARED: (keyof AnnotationInfo)[] = ["subtype", "rect", "contents", "color", "flags", "quadPointCount", "inkPathCount", "hasAppearance", "hasPopup", "uri", "fieldName"];
+const COMPARED: (keyof AnnotationInfo)[] = ["subtype", "rect", "contents", "color", "flags", "quadPointCount", "inkPathCount", "hasAppearance", "hasPopup", "uri", "fieldName", "author", "opacity", "borderWidth", "modified"];
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Identity of an annotation across a copy: /NM when set, otherwise subtype + rect (a moved unnamed annotation reads as missing + added). */

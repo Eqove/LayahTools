@@ -207,6 +207,34 @@
         ],
         "isEncrypted": false
       }
+    },
+    {
+      "id": "PDF-13",
+      "name": "annotations-matrix.pdf",
+      "category": "annotations",
+      "sha256": "7ba5ada4001ea1d1f007eb21e003c64adaaf9cae4e63a819ffe716f0dfe67213",
+      "pageCount": 3,
+      "expected": {
+        "hasTextLayer": true,
+        "hasImages": false,
+        "hasAnnotations": true,
+        "hasForms": true,
+        "formFields": [
+          "matrix.field"
+        ],
+        "annotationSubtypes": [
+          "Squiggly",
+          "Circle",
+          "Line",
+          "Stamp",
+          "Text",
+          "FreeText",
+          "Link",
+          "Widget",
+          "Square"
+        ],
+        "isEncrypted": false
+      }
     }
   ]
 }

@@ -172,6 +172,30 @@ async function main() {
   );
   check("a non-dictionary /Annots entry is counted as dangling, not ignored", dangling.dangling === 1, `dangling ${dangling.dangling}`);
 
+  // 6. A-4.4 matrix fields (author, opacity, border, date, appearance digest, page link, GoTo target, AcroForm reach).
+  console.log("\n--- 6. Matrix fields on annotations-matrix.pdf ---");
+  const mx = await inspectAnnotations(read("annotations-matrix.pdf"));
+  const byName = (n: string) => mx.pages.flat().find((a) => a.name === n)!;
+  const sg = byName("sg-1");
+  check("author, opacity and modified date are read", sg.author === "Reviewer A" && sg.opacity === 0.5 && sg.modified === "D:20260101000000Z", JSON.stringify([sg.author, sg.opacity, sg.modified]));
+  check("border width from /BS /W", byName("ci-1").borderWidth === 3 && byName("sq-3").borderWidth === 4);
+  check("border width from /Border when no /BS", byName("lk-goto").borderWidth === 2);
+  check("appearance digest present for annotations with an appearance, null without", !!sg.appearanceDigest && byName("lk-goto").appearanceDigest === null);
+  check("digests differ between different appearances", byName("sg-1").appearanceDigest !== byName("ci-1").appearanceDigest);
+  check("fresh file: /P points at the containing page", mx.pages.flat().every((a) => a.pageRefOk));
+  check("GoTo link resolves to page index 2; URI link has no target", byName("lk-goto").destPage === 2 && ins.pages[0].find((a) => a.name === "link-1")!.destPage === null);
+  check("widget is reachable from /AcroForm; markup is null", mx.pages[1].find((a) => a.subtype === "Widget")!.inAcroForm === true && sg.inAcroForm === null);
+  const orphan = await (async () => {
+    const d = await PDFDocument.load(read("annotations-matrix.pdf"));
+    const o = await PDFDocument.create();
+    (await o.copyPages(d, d.getPageIndices())).forEach((pg) => o.addPage(pg));
+    return inspectAnnotations(await o.save());
+  })();
+  const og = orphan.pages.flat().find((a) => a.name === "lk-goto")!;
+  check("regression lock: copyPages output reports /P off-page, a dead GoTo target and a detached widget", !og.pageRefOk && og.destPage === -1 && orphan.pages[1].find((a) => a.subtype === "Widget")!.inAcroForm === false);
+  const authorChanged = await inspectAnnotations(await editAnnots(read("annotations-matrix.pdf"), 0, (annots) => { annots.lookup(0, PDFDict).set(PDFName.of("T"), PDFString.of("Someone Else")); }));
+  check("changed author is reported as modified", compareAnnotations(mx, authorChanged).modified.some((m) => m.changes.some((c) => c.field === "author")));
+
   console.log(`\n=================================================`);
   console.log(failed ? `${failed} ANNOTATION TESTS FAILED` : "ALL ANNOTATION TESTS PASSED");
   console.log(`=================================================\n`);

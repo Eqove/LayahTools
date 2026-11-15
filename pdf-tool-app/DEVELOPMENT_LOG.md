@@ -252,3 +252,8 @@ no private access). The B-1.1 raw PDFium counters in `mutation-probe.ts` are kep
 Sanity check: two guards were broken on purpose and the suite failed each time (generation check off: 1 check failed, because the stamp
 alone already makes old ids unresolvable; rollback no longer faulting: 3 checks failed); the file was restored byte-identical. Not covered:
 no browser run, no exhaustive mutation testing.
+
+## Alpha Phase 4 close-out: annotation preservation matrix
+- `scripts/test-annotation-matrix.ts` runs 23 operations on 2 annotation fixtures (15 annotation kinds): 214 PASS, 131 PARTIAL, 0 FAIL, pinned by `KNOWN`. Results in `ANNOTATION_PRESERVATION_MATRIX.md`.
+- Open issue: pdf-lib `copyPages` (merge, insert, split, extract, rearrange, compress, unlock) leaves annotation `/P` and GoTo targets on orphan page objects and drops `/AcroForm`. Deferred; see `ALPHA_PHASE4_REPORT.md` section 10.
+- `inspectAnnotations` now also reads author, opacity, border width, modified date, decoded appearance digest, page link, GoTo target and AcroForm reach.
