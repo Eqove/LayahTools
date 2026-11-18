@@ -9,4 +9,4 @@ npm test
 npm run build
 ```
 
-More detail: [Architecture](LAYAH_ARCHITECTURE.md) · [Development log](DEVELOPMENT_LOG.md) · [Tool audit](docs/TOOL_AUDIT.md)
+More detail: [Architecture](LAYAH_ARCHITECTURE.md) · [Development log](DEVELOPMENT_LOG.md) · [Tool audit](docs/TOOL_AUDIT.md) · [DOCX merge](docs/DOCX_MERGE.md)
