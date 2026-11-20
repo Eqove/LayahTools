@@ -16,7 +16,7 @@ interface EditorControllerProps {
   onTogglePages?: () => void;
 }
 
-type Tool = "select" | "text" | "image" | "whiteout" | "shape";
+type Tool = "select" | "hand" | "text" | "image" | "whiteout" | "shape";
 type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
 const SHAPES: { id: ShapeKind; label: string }[] = [
   { id: "rect", label: "Rectangle" },
@@ -29,6 +29,7 @@ interface PendingImage { rgba: Uint8ClampedArray; pw: number; ph: number; name: 
 
 const ICONS: Record<string, string> = {
   select: "M5 3l14 7-6 2-2 6z",
+  hand: "M8 13V5.5a1.5 1.5 0 013 0V12m0-6.5v-1a1.5 1.5 0 013 0V12m0-6.5a1.5 1.5 0 013 0V12m0-4a1.5 1.5 0 013 0v6a7 7 0 01-7 7h-1a7 7 0 01-5.6-2.8L3.5 14a1.5 1.5 0 012.3-1.9L8 14.5",
   text: "M4 6V4h16v2M12 4v16m-3 0h6",
   image: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z",
   whiteout: "M7 21h10M5.5 13.5l7-7a2 2 0 012.8 0l3.2 3.2a2 2 0 010 2.8l-6 6H9l-3.5-3.5a2 2 0 010-1.5z",
@@ -49,6 +50,7 @@ const Icon = ({ name }: { name: string }) => (
 );
 const HINTS: Record<Tool, string> = {
   select: "Select a line to edit, resize, recolour or delete it · drag to move",
+  hand: "Drag to move around the page. Choose Select to edit again.",
   text: "Click on the page where the text should go.",
   image: "Click on the page to place your image.",
   whiteout: "Drag a box over what you want to cover. This only covers it visually; to remove sensitive text, use Redact PDF.",
@@ -516,6 +518,7 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
   const textRunOnly = !!singleRun;
   const modes: [Tool, string, string][] = [
     ["select", "Select", "Select, move and edit what is already on the page"],
+    ["hand", "Hand", "Drag to pan the page (or hold Space, or drag with the middle button)"],
     ["text", "Text", "Add new text"],
     ["image", "Image", "Add an image from your computer"],
     ["whiteout", "Whiteout", "Cover part of the page with white"],
@@ -654,6 +657,7 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
           viewMode="scroll"
           preserveScroll
           toolbarStart={toolbarStart}
+          handTool={tool === "hand"}
           renderPageOverlay={pageIndex => (
             <EditorPageOverlay
               key={pageIndex}
@@ -797,7 +801,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
 
   // All gesture decisions live in lib/document/gestures.ts; this component only translates DOM events.
   const onPointerDown = (e: React.PointerEvent) => {
-    if (disabled) return;
+    if (disabled || tool === "hand") return; // the viewer pans; nothing on the page is picked
     if (e.pointerType === "touch") {
       activeTouches.add(e.pointerId);
       if (activeTouches.size > 1) { cancelled.current = true; onPointerAbort(); return; }
