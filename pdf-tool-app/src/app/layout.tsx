@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   title: "LayahTools",
   description: "Get more done with your files.",
   appleWebApp: { capable: true, title: "LayahTools", statusBarStyle: "default" },
-  icons: { apple: "/icon-192.png" },
+  icons: { icon: "/icon-192.png", apple: "/icon-192.png" },
 };
 
 export const viewport: Viewport = { themeColor: "#2400c6" };

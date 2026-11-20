@@ -14,6 +14,7 @@ const PdfViewer = dynamic(
 );
 import { RedactOverlay } from "@/components/pdf/interactive/RedactOverlay";
 import { SignOverlay } from "@/components/pdf/interactive/SignOverlay";
+import { SignaturePicker } from "@/components/workspace/SignaturePicker";
 
 const EditorController = dynamic(
   () => import('@/components/pdf/interactive/EditorController').then((mod) => mod.EditorController),
@@ -135,7 +136,6 @@ export function Workspace() {
   // Phase 2 states: Metadata drawer, Password dialog, File size dismissal
   const [isMetadataOpen, setIsMetadataOpen] = useState(false);
   // Phone layout: Files / outputs / tool options live in a slide-up sheet instead of a side column.
-  const [editPage, setEditPage] = useState(0);
   const [editPagesOpen, setEditPagesOpen] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pendingPasswordFile, setPendingPasswordFile] = useState<File | null>(null);
@@ -400,6 +400,29 @@ export function Workspace() {
     });
   }
 
+  // Page thumbnails: desktop side panel and phone overlay share these. Only the one that fits the screen is mounted
+  // (a CSS-hidden copy would still load and render every page). null = not known yet (server render): mount neither.
+  const [phone, setPhone] = useState<boolean | null>(null);
+  useEffect(() => {
+    const q = window.matchMedia("(max-width: 767px)");
+    const sync = () => setPhone(q.matches);
+    sync();
+    q.addEventListener("change", sync);
+    return () => q.removeEventListener("change", sync);
+  }, []);
+
+  // Page thumbnails: props shared by both.
+  const thumbProps = {
+    file: activeFile,
+    onFileModified: (updated: File) => { if (active) replaceFile(active.id, updated); },
+    onExtractOutput: async (extracted: File) => {
+      const bytes = new Uint8Array(await extracted.arrayBuffer());
+      setResults((prev) => [{ filename: extracted.name, bytes, sourceSize: activeFile?.size }, ...prev]);
+      setStatus(`Extracted page output ready: ${extracted.name}`);
+      setStatusTone("success");
+    },
+  };
+
   return (
     <div className="h-full flex flex-col bg-slate-50 relative">
       <WorkspaceHeader goHome={() => setWorkspaceActive(false)} onSelectTool={() => setStatus("")} />
@@ -519,25 +542,10 @@ export function Workspace() {
                     {/* Edit Tool Integration */}
                     {!choosing && files.length > 0 && activeTool === "edit" && (
                       <div className="flex-1 flex overflow-hidden">
-                        <div className={editPagesOpen ? "hidden md:flex" : "hidden"}>
-                          <PageThumbnailSidebar
-                            file={activeFile}
-                            activePageIndex={editPage}
-                            onPageSelect={(i) => {
-                              setEditPage(i);
-                              document.querySelector(`[data-page-number="${i + 1}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                            }}
-                            onFileModified={(updated) => replaceFile(active.id, updated)}
-                            onExtractOutput={async (extracted) => {
-                              const bytes = new Uint8Array(await extracted.arrayBuffer());
-                              setResults((prev) => [{ filename: extracted.name, bytes, sourceSize: activeFile?.size }, ...prev]);
-                              setStatus(`Extracted page output ready: ${extracted.name}`);
-                              setStatusTone("success");
-                            }}
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0 overflow-hidden">
+                        {phone === false && editPagesOpen && <div className="flex"><PageThumbnailSidebar {...thumbProps} /></div>}
+                        <div className="flex-1 min-w-0 overflow-hidden relative isolate">
                        <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} pagesOpen={editPagesOpen} onTogglePages={() => setEditPagesOpen((o) => !o)} />
+                          {phone && <PageThumbnailSidebar {...thumbProps} variant="floating" />}
                         </div>
                       </div>
                     )}
@@ -545,19 +553,9 @@ export function Workspace() {
                     {/* PDF Viewer with Page Thumbnails Sidebar */}
                     {!choosing && files.length > 0 && activeTool !== "blank" && activeTool !== "edit" && (
                       <div className="flex-1 flex overflow-hidden">
-                        <div className="hidden md:flex">
-                        <PageThumbnailSidebar
-                          file={activeFile}
-                          onFileModified={(updated) => replaceFile(active.id, updated)}
-                          onExtractOutput={async (extracted) => {
-                            const bytes = new Uint8Array(await extracted.arrayBuffer());
-                            setResults((prev) => [{ filename: extracted.name, bytes, sourceSize: activeFile?.size }, ...prev]);
-                            setStatus(`Extracted page output ready: ${extracted.name}`);
-                            setStatusTone("success");
-                          }}
-                        />
-                        </div>
-                        <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
+                        {phone === false && <div className="flex"><PageThumbnailSidebar {...thumbProps} /></div>}
+                        <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative isolate">
+                          {phone && activeTool !== "rearrange" && <PageThumbnailSidebar {...thumbProps} variant="floating" />}
                           <PdfViewer 
                             file={activeFile} 
                             viewMode={activeTool === "rearrange" ? "grid" : "scroll"}
@@ -573,6 +571,12 @@ export function Workspace() {
                               return null;
                             }}
                           />
+                          {/* Sign: ask for the signature right on the document, not only in the side panel */}
+                          {activeTool === "sign" && !form.signatureDataUrl && (
+                            <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px] overflow-y-auto">
+                              <SignaturePicker variant="card" value={null} onChange={(url) => updateForm("signatureDataUrl", url)} />
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1008,28 +1012,13 @@ function ToolFields({
   }
 
   if (activeTool === "sign") {
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        updateForm("signatureDataUrl", event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    };
-
     return (
-      <div className="flex flex-col gap-3">
-        <label className={labelClass}>
-          Signature Image (PNG/JPG)
-          <input type="file" accept="image/png, image/jpeg" className={inputClass} onChange={handleFileChange} />
-        </label>
-        {form.signatureDataUrl && (
-          <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-md">
-            Click anywhere on a document page to place your signature.
-          </div>
-        )}
-      </div>
+      <SignaturePicker
+        value={form.signatureDataUrl}
+        onChange={(url) => updateForm("signatureDataUrl", url)}
+        placedCount={form.signatures.length}
+        onClearPlaced={() => updateForm("signatures", [])}
+      />
     );
   }
 
