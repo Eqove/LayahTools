@@ -1,5 +1,6 @@
 import React from "react";
 import clsx from "clsx";
+import { ZOOM_MAX, ZOOM_MIN } from "@/lib/viewer/navigation";
 
 interface PdfViewerToolbarProps {
   currentPage: number;
@@ -8,11 +9,15 @@ interface PdfViewerToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onSetZoom: (zoom: number) => void;
+  /** Fit the current page to the visible width / whole page (omitted where the view has no fit). */
+  onFit?: (mode: "width" | "page") => void;
   onPrevPage: () => void;
   onNextPage: () => void;
   /** Optional tools shown at the start of the same row (e.g. the editor's tool buttons). */
   start?: React.ReactNode;
 }
+
+const PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
 export function PdfViewerToolbar({
   currentPage,
@@ -21,6 +26,7 @@ export function PdfViewerToolbar({
   onZoomIn,
   onZoomOut,
   onSetZoom,
+  onFit,
   onPrevPage,
   onNextPage,
   start,
@@ -56,7 +62,7 @@ export function PdfViewerToolbar({
       <div className="flex items-center gap-1">
         <button
           onClick={onZoomOut}
-          disabled={zoom <= 0.5}
+          disabled={zoom <= ZOOM_MIN}
           className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Zoom Out"
         >
@@ -64,21 +70,30 @@ export function PdfViewerToolbar({
         </button>
         
         <select 
-          value={zoom}
-          onChange={(e) => onSetZoom(parseFloat(e.target.value))}
+          value={String(zoom)}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "fit-width" || v === "fit-page") onFit?.(v === "fit-width" ? "width" : "page");
+            else onSetZoom(parseFloat(v));
+          }}
+          title="Zoom (Ctrl + scroll to zoom at the pointer)"
           className="text-sm font-medium text-slate-700 bg-transparent border-none focus:ring-0 cursor-pointer appearance-none px-2 text-center"
         >
+          {!PRESETS.includes(zoom) && <option value={String(zoom)}>{Math.round(zoom * 100)}%</option>}
           <option value={0.5}>50%</option>
           <option value={0.75}>75%</option>
           <option value={1}>100%</option>
           <option value={1.25}>125%</option>
           <option value={1.5}>150%</option>
           <option value={2}>200%</option>
+          <option value={3}>300%</option>
+          {onFit && <option value="fit-width">Fit width</option>}
+          {onFit && <option value="fit-page">Fit page</option>}
         </select>
 
         <button
           onClick={onZoomIn}
-          disabled={zoom >= 3}
+          disabled={zoom >= ZOOM_MAX}
           className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Zoom In"
         >

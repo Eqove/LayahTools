@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { CommandBar } from "./CommandBar";
 
 const PHRASES = [
   "work with PDFs",
@@ -10,7 +11,9 @@ const PHRASES = [
   "merge files",
   "split documents",
   "add page numbers",
-  "convert PDF pages to images"
+  "work with Word",
+  "work with Excel",
+  "convert your files"
 ];
 
 function TypewriterEffect() {
@@ -57,6 +60,9 @@ export function EntryState() {
         <div className="font-sans font-bold text-xl tracking-tight">LayahTools</div>
         <div className="flex gap-8 items-center text-sm font-medium">
           <a href="#workspace" className="opacity-90 hover:opacity-100 transition-opacity">PDF</a>
+          <span title="Word support is coming soon" className="opacity-60 cursor-not-allowed hidden md:inline select-none">Word</span>
+          <span title="Excel support is coming soon" className="opacity-60 cursor-not-allowed hidden md:inline select-none">Excel</span>
+          <span title="Additional document formats coming soon" className="opacity-60 cursor-not-allowed hidden md:inline select-none">More</span>
         </div>
       </nav>
 
@@ -67,7 +73,7 @@ export function EntryState() {
         <div className="h-8 mb-16 flex items-center justify-center">
           <TypewriterEffect />
         </div>
-        <a href="#workspace" className="bg-white text-[#2400c6] px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-blue-50 transition-colors shadow-sm">Open PDF tools &rarr;</a>
+        <CommandBar />
       </div>
     </section>
   );

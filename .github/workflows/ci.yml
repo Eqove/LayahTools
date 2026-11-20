@@ -2,13 +2,13 @@ name: LayahTools CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [betadev, main]
   pull_request:
-    branches: [main, develop]
+    branches: [betadev, main]
 
 jobs:
-  test-and-build:
-    name: Test & Production Build
+  test:
+    name: Test, typecheck${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && ' & build' || '' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the lint gate compares against the base commit
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
@@ -31,8 +33,33 @@ jobs:
       - name: Synchronize PDFium WASM
         run: npm run copy-wasm
 
-      - name: Run Test Suites (Workspace, Merge, Editor, Regression & Visual Diff)
+      - name: Run test suites
         run: npm test
 
-      - name: Run Next.js Production Build
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Existing lint errors are not a failure yet (baseline 2026-11-15: 27 errors, 5 warnings in src/).
+      # A changed production file must not have more lint errors than it had at the base commit.
+      - name: Lint gate (no new errors in changed files)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          count() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s)[0]?.errorCount??0)}catch{console.log(0)}})"; }
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then echo "No base commit; skipping lint gate."; exit 0; fi
+          fail=0
+          for f in $(git diff --name-only --diff-filter=AM "$BASE" HEAD -- src | grep -E '\.(ts|tsx)$' | sed 's#^pdf-tool-app/##' || true); do
+            head=$(npx eslint -f json "$f" | count)
+            base=$( (git show "$BASE:pdf-tool-app/$f" 2>/dev/null || true) | npx eslint -f json --stdin --stdin-filename "$f" | count)
+            echo "$f: base=$base head=$head"
+            if [ "$head" -gt "$base" ]; then echo "::error file=pdf-tool-app/$f::lint errors went from $base to $head"; fail=1; fi
+          done
+          exit $fail
+
+      - name: Lint report (informational)
+        continue-on-error: true
+        run: npx eslint src
+
+      - name: Production build
+        if: github.base_ref == 'main' || github.ref == 'refs/heads/main'
         run: npm run build
