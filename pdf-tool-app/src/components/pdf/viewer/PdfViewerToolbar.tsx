@@ -68,12 +68,10 @@ export function PdfViewerToolbar({
           onChange={(e) => onSetZoom(parseFloat(e.target.value))}
           className="text-sm font-medium text-slate-700 bg-transparent border-none focus:ring-0 cursor-pointer appearance-none px-2 text-center"
         >
-          <option value={0.5}>50%</option>
-          <option value={0.75}>75%</option>
-          <option value={1}>100%</option>
-          <option value={1.25}>125%</option>
-          <option value={1.5}>150%</option>
-          <option value={2}>200%</option>
+          {/* Pinch and the +/- buttons can land between the presets: list the current zoom too so the label is true. */}
+          {[...new Set([0.5, 0.75, 1, 1.25, 1.5, 2, zoom])].sort((a, b) => a - b).map((z) => (
+            <option key={z} value={z}>{Math.round(z * 100)}%</option>
+          ))}
         </select>
 
         <button

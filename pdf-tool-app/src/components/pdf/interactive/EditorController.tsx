@@ -11,6 +11,9 @@ import type { LayahObjectBounds, LayahShapeObject, LayahTextObject } from "@/lib
 interface EditorControllerProps {
   file: File;
   onFileModified: (file: File) => void;
+  /** Page thumbnail panel (owned by the workspace): shown or hidden from the toolbar. */
+  pagesOpen?: boolean;
+  onTogglePages?: () => void;
 }
 
 type Tool = "select" | "text" | "image" | "whiteout" | "shape";
@@ -195,7 +198,7 @@ async function decodeImage(file: File): Promise<PendingImage> {
   return { rgba: ctx.getImageData(0, 0, pw, ph).data, pw, ph, name: file.name };
 }
 
-export function EditorController({ file, onFileModified }: EditorControllerProps) {
+export function EditorController({ file, onFileModified, pagesOpen = true, onTogglePages }: EditorControllerProps) {
   const sessionRef = useRef<EditorSession | null>(null);
   const [machine] = useState(() => new InteractionStateMachine());
   const [editorState, setEditorState] = useState<LayahEditorState>(machine.getState());
@@ -217,9 +220,10 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   const [shapeFill, setShapeFill] = useState(false);
   const [shapeMenu, setShapeMenu] = useState(false);
   const shapeMenuRef = useRef<HTMLDivElement>(null);
+  const phoneBarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!shapeMenu) return;
-    const close = (e: MouseEvent) => { if (!shapeMenuRef.current?.contains(e.target as Node)) setShapeMenu(false); };
+    const close = (e: MouseEvent) => { const t = e.target as Node; if (!shapeMenuRef.current?.contains(t) && !phoneBarRef.current?.contains(t)) setShapeMenu(false); };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [shapeMenu]);
@@ -576,14 +580,22 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
   // Tools live in the viewer's page/zoom row, so the editor needs only one toolbar row.
   const toolbarStart = (
     <>
-      <div className="inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden" role="toolbar" aria-label="Edit tools" title={HINTS.select}>
+      {onTogglePages && (
+        <div className="hidden md:block shrink-0">
+          <button type="button" className={"inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-slate-200 rounded-md transition-colors " + (pagesOpen ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 hover:bg-slate-50")}
+            aria-pressed={pagesOpen} title={pagesOpen ? "Hide the page thumbnails" : "Show the page thumbnails"} onClick={onTogglePages}>
+            Pages <span className="text-xs opacity-80">{pagesOpen ? "On" : "Off"}</span>
+          </button>
+        </div>
+      )}
+      <div className="hidden md:inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden" role="toolbar" aria-label="Edit tools" title={HINTS.select}>
         {modes.map(([t, label, tip]) => (
           <button key={t} className={seg(tool === t)} disabled={!!busy} title={tip} aria-pressed={tool === t} onClick={() => pickMode(t)}>
             <Icon name={t} /><span className="hidden sm:inline">{label}</span>
           </button>
         ))}
       </div>
-      <div ref={shapeMenuRef} className="relative shrink-0">
+      <div ref={shapeMenuRef} className="hidden md:block relative shrink-0">
         <div className="inline-flex border border-slate-200 rounded-md overflow-hidden">
           <button className={seg(tool === "shape")} disabled={!!busy} title={"Draw a shape (" + SHAPES.find(sh => sh.id === shapeKind)!.label.toLowerCase() + ")"} aria-pressed={tool === "shape"} onClick={() => pickMode("shape")}>
             <Icon name={shapeKind} /><span className="hidden sm:inline">Shapes</span>
@@ -604,7 +616,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
         )}
       </div>
       {tool === "shape" && (
-        <div className="inline-flex shrink-0 items-center gap-2 text-xs text-slate-600">
+        <div className="hidden md:inline-flex shrink-0 items-center gap-2 text-xs text-slate-600">
           <input type="color" value={shapeColor} onChange={e => setShapeColor(e.target.value)} aria-label="Shape colour" title="Shape colour" className="h-8 w-9 p-1 border border-slate-200 rounded bg-white cursor-pointer" />
           <select value={shapeWidth} onChange={e => setShapeWidth(Number(e.target.value))} aria-label="Line thickness" title="Line thickness" className="h-8 border border-slate-200 rounded bg-white text-xs px-1">
             <option value={1}>Thin</option><option value={2}>Medium</option><option value={4}>Thick</option><option value={8}>Extra thick</option>
@@ -614,7 +626,7 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
           )}
         </div>
       )}
-      <div className="inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden">
+      <div className="hidden md:inline-flex shrink-0 border border-slate-200 rounded-md overflow-hidden">
         <button className={seg(false)} disabled={!!busy || !session.canUndo} onClick={undo} title="Undo (Ctrl+Z)"><Icon name="undo" /><span className="hidden sm:inline">Undo</span></button>
         <button className={seg(false)} disabled={!!busy || !session.canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /><span className="hidden sm:inline">Redo</span></button>
       </div>
@@ -682,9 +694,57 @@ export function EditorController({ file, onFileModified }: EditorControllerProps
           </div>
         </div>
       </div>
+      {/* Phone: tools sit at the bottom, in reach of the thumb; shape options slide up above them. */}
+      <div ref={phoneBarRef} className="md:hidden shrink-0 relative z-[70] border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)]">
+        {shapeMenu && (
+          <div className="sheet-up absolute bottom-full inset-x-0 bg-white border-t border-slate-200 rounded-t-2xl shadow-[0_-8px_24px_rgba(15,23,42,0.12)] p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-slate-900">Shape</span>
+              <button type="button" onClick={() => setShapeMenu(false)} className="px-4 py-2 rounded-md text-sm font-medium bg-blue-600 text-white">Done</button>
+            </div>
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {SHAPES.map(sh => (
+                <button key={sh.id} type="button" aria-pressed={shapeKind === sh.id}
+                  onClick={() => { setShapeKind(sh.id); setPlacement(null); setEditing(null); setPendingImage(null); setTool("shape"); }}
+                  className={`h-16 flex flex-col items-center justify-center gap-1 rounded-lg border text-xs ${shapeKind === sh.id ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-700"}`}>
+                  <Icon name={sh.id} />{sh.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
+              <label className="flex items-center gap-2">Colour
+                <input type="color" value={shapeColor} onChange={e => setShapeColor(e.target.value)} aria-label="Shape colour" className="h-10 w-12 p-1 border border-slate-200 rounded bg-white" />
+              </label>
+              <select value={shapeWidth} onChange={e => setShapeWidth(Number(e.target.value))} aria-label="Line thickness" className="h-10 border border-slate-200 rounded bg-white px-2">
+                <option value={1}>Thin</option><option value={2}>Medium</option><option value={4}>Thick</option><option value={8}>Extra thick</option>
+              </select>
+              {(shapeKind === "rect" || shapeKind === "ellipse") && (
+                <label className="flex items-center gap-2 h-10"><input type="checkbox" className="w-5 h-5" checked={shapeFill} onChange={e => setShapeFill(e.target.checked)} />Filled</label>
+              )}
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Drag on the page with one finger to draw. Use two fingers to scroll or zoom.</p>
+          </div>
+        )}
+        <nav aria-label="Edit tools" className="grid grid-cols-7">
+          {[
+            ...modes.map(([t, label]) => ({ key: t, label, icon: t as string, active: tool === t, disabled: !!busy, onClick: () => pickMode(t) })),
+            { key: "shape", label: "Shapes", icon: shapeKind as string, active: tool === "shape", disabled: !!busy, onClick: () => { pickMode("shape"); setShapeMenu(true); } },
+            { key: "undo", label: "Undo", icon: "undo", active: false, disabled: !!busy || !session.canUndo, onClick: undo },
+            { key: "redo", label: "Redo", icon: "redo", active: false, disabled: !!busy || !session.canRedo, onClick: redo },
+          ].map(b => (
+            <button key={b.key} type="button" onClick={b.onClick} disabled={b.disabled} aria-pressed={b.key === "undo" || b.key === "redo" ? undefined : b.active}
+              className={`min-h-[56px] flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40 ${b.active ? "text-blue-700 bg-blue-50" : "text-slate-600 active:bg-slate-100"}`}>
+              <Icon name={b.icon as keyof typeof ICONS} />{b.label}
+            </button>
+          ))}
+        </nav>
+      </div>
     </div>
   );
 }
+
+/** Touch pointers currently down on any page overlay; two or more means pinch/scroll, not editing. */
+const activeTouches = new Set<number>();
 
 function useElementSize(ref: React.RefObject<HTMLElement | null>) {
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -717,6 +777,9 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   const [wo, setWo] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   const [hd, setHd] = useState<{ id: string; handle: string; cur: { x1: number; y1: number; x2: number; y2: number } } | null>(null);
   const [hover, setHover] = useState<{ id: string; bounds: { left: number; right: number; top: number; bottom: number } } | null>(null);
+  // Touch: a tap places text/images on release; a second finger cancels whatever the first one started.
+  const tapAt = useRef<{ x: number; y: number } | null>(null);
+  const cancelled = useRef(false);
   void rev;
   const page = pageOf(session, pageIndex);
   if (!page) return null;
@@ -735,18 +798,25 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
   // All gesture decisions live in lib/document/gestures.ts; this component only translates DOM events.
   const onPointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
+    if (e.pointerType === "touch") {
+      activeTouches.add(e.pointerId);
+      if (activeTouches.size > 1) { cancelled.current = true; onPointerAbort(); return; }
+    }
+    cancelled.current = false;
     const pt = toPdf(e);
     if (tool === "whiteout" || tool === "shape") {
       setWo({ a: pt, b: pt });
       try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer */ }
       return;
     }
-    if (tool !== "select") { onPlace(pageIndex, pt.x, pt.y); return; }
+    if (tool !== "select") { tapAt.current = pt; return; }
     gestureDown(machine, page, pt, e.shiftKey);
     sync();
     try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* synthetic/expired pointer: dragging still works without capture */ }
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (activeTouches.size > 1) { if (!cancelled.current) { cancelled.current = true; onPointerAbort(); } return; }
+    if (cancelled.current) return;
     if (wo) { setWo({ ...wo, b: toPdf(e) }); return; }
     // Hover highlight: shows what a click would select (select tool, nothing being dragged).
     if (tool === "select" && !disabled && editorState.phase === "idle" && e.pointerType === "mouse") {
@@ -756,7 +826,9 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     if (gestureMove(machine, pageIndex, toPdf(e), ctx.zoom)) sync();
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    activeTouches.delete(e.pointerId);
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+    if (cancelled.current) { if (!activeTouches.size) cancelled.current = false; return; }
     if (wo) {
       if (tool === "shape") { const { a, b } = wo; setWo(null); onShape(pageIndex, a, b); return; }
       const x = Math.min(wo.a.x, wo.b.x), y = Math.min(wo.a.y, wo.b.y);
@@ -765,12 +837,14 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
       if (width >= 4 && height >= 4) onWhiteout(pageIndex, { x, y, width, height });
       return;
     }
+    if (tool !== "select") { const p = tapAt.current; tapAt.current = null; if (p) onPlace(pageIndex, p.x, p.y); return; }
     const intent = gestureUp(machine, page, e.shiftKey, ctx.zoom);
     sync();
     if (intent?.type === "move") onMove(pageIndex, intent.objectIds, intent.deltaX, intent.deltaY);
   };
   // pointercancel and lostpointercapture abandon the gesture: they must never commit a move.
   const onPointerAbort = () => {
+    tapAt.current = null;
     if (tool !== "select") { setWo(null); return; }
     gestureCancel(machine, pageIndex);
     sync();
@@ -834,7 +908,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
     <div
       ref={ref}
       data-testid={`editor-overlay-${pageIndex}`}
-      className={`absolute inset-0 z-50 ${tool === "whiteout" || tool === "shape" || (tool === "select" && mine && editorState.selectedObjectIds.length > 0) ? "touch-none" : "touch-pan-y"} ${
+      className={`absolute inset-0 z-50 touch-none ${
         tool === "select"
           ? editorState.phase === "dragging"
             ? "cursor-grabbing"
@@ -844,7 +918,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerAbort}
+      onPointerCancel={e => { activeTouches.delete(e.pointerId); onPointerAbort(); }}
       onLostPointerCapture={onPointerAbort}
       onPointerLeave={() => { if (hover) setHover(null); }}
       onDoubleClick={() => { if (tool === "select" && !disabled && actions.canEdit && mine) actions.edit(); }}

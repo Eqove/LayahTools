@@ -136,8 +136,8 @@ inside effects). Not an application defect; disable the extension (or use a priv
 
 ## External runtime dependencies
 The product promise is local processing, but these load from third parties in the browser:
-- **PDF.js worker**: `//unpkg.com/pdfjs-dist@<version>/build/pdf.worker.min.mjs`, set in 7 places
-  (`PdfViewer.tsx`, `heavy-operations.ts`, `useOcrFlow.ts` for the scanned-PDF check, `intelligence-operations.ts` x4).
+- **PDF.js worker**: `//unpkg.com/pdfjs-dist@<version>/build/pdf.worker.min.mjs`, set in 8 places
+  (`PdfViewer.tsx`, `PageThumbnailSidebar.tsx`, `heavy-operations.ts`, `useOcrFlow.ts` for the scanned-PDF check, `intelligence-operations.ts` x4).
   Without network the viewer cannot render. The version is pinned to the installed `pdfjs.version`.
 - **Tesseract.js**: `createWorker("eng")` is called with defaults, which fetch the worker, core and `eng` language
   data from a public CDN (default library behaviour). OCR was run successfully in a browser session with network
@@ -145,6 +145,11 @@ The product promise is local processing, but these load from third parties in th
 - **Fonts**: `next/font/google` (Geist, Instrument Serif) is resolved at build time and self-hosted; no runtime request.
 
 No document bytes are sent to any of these.
+
+**Offline / installable app.** `public/sw.js` (registered in production only, by `components/shell/Pwa.tsx`) caches the
+app shell, `/_next/static/*`, `pdfium.wasm` and the CDN files above (unpkg, jsdelivr, tessdata) on first use, so after
+one online visit the tools work offline. It never sees document bytes (they are processed in memory). Bump `CACHE` in
+`sw.js` if caching rules change. `app/manifest.ts` + `public/icon-192.png`/`icon-512.png` make the site installable.
 
 ## Phase 7 integration and baseline
 - Merge commit `2fc5270` combined `44b5991` (adds a root `MEMORY.md` only; since untracked, see log D-05) and `70c2210` (all Phase 7 code):

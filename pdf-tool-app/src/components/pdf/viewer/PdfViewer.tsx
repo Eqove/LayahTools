@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -177,6 +177,69 @@ export function PdfViewer({
     }
   };
 
+  // Two fingers: pinch to zoom and drag to scroll (one finger stays with the page tool, e.g. editing).
+  // While pinching the pages are scaled with CSS; the real zoom is applied once, when the fingers lift.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(zoom);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  const pendingScroll = useRef<{ x: number; y: number } | null>(null);
+  const hasFile = !!file;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let g: { d: number; mx: number; my: number; sl: number; st: number; ox: number; oy: number; s: number } | null = null;
+    const read = (t: TouchList) => {
+      const r = el.getBoundingClientRect();
+      return { d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1, mx: (t[0].clientX + t[1].clientX) / 2 - r.left, my: (t[0].clientY + t[1].clientY) / 2 - r.top };
+    };
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      const i = read(e.touches);
+      const c = contentRef.current;
+      const ox = i.mx + el.scrollLeft - (c?.offsetLeft ?? 0), oy = i.my + el.scrollTop - (c?.offsetTop ?? 0);
+      g = { ...i, sl: el.scrollLeft, st: el.scrollTop, ox, oy, s: 1 };
+      if (c) c.style.transformOrigin = `${ox}px ${oy}px`;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!g || e.touches.length !== 2) return;
+      e.preventDefault();
+      const i = read(e.touches);
+      const z = zoomRef.current;
+      g.s = Math.min(3, Math.max(0.5, (z * i.d) / g.d)) / z;
+      el.scrollLeft = g.sl - (i.mx - g.mx);
+      el.scrollTop = g.st - (i.my - g.my);
+      if (contentRef.current) contentRef.current.style.transform = `scale(${g.s})`;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!g || e.touches.length >= 2) return;
+      const { s, ox, oy } = g;
+      g = null;
+      if (contentRef.current) contentRef.current.style.transform = "";
+      if (Math.abs(s - 1) < 0.02) return;
+      // Keep the spot under the fingers in place once the pages re-render at the new size.
+      pendingScroll.current = { x: el.scrollLeft + ox * (s - 1), y: el.scrollTop + oy * (s - 1) };
+      setZoom((z) => Math.min(3, Math.max(0.5, z * s)));
+    };
+    el.addEventListener("touchstart", onStart, { passive: false });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchcancel", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [hasFile]);
+  useLayoutEffect(() => {
+    const el = containerRef.current, p = pendingScroll.current;
+    if (!el || !p) return;
+    pendingScroll.current = null;
+    el.scrollLeft = p.x;
+    el.scrollTop = p.y;
+  }, [zoom]);
+
   const zoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
   const zoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
 
@@ -260,7 +323,7 @@ export function PdfViewer({
       
       <div 
         ref={containerRef}
-        className="flex-1 overflow-y-auto overflow-x-auto relative outline-none py-8 px-4"
+        className="flex-1 overflow-y-auto overflow-x-auto relative outline-none py-8 px-4 touch-pan-x touch-pan-y"
         tabIndex={0}
       >
         {error ? (
@@ -271,7 +334,7 @@ export function PdfViewer({
           </div>
         ) : (
           <>
-            {renderDoc(preserveScroll ? shown ?? file : file, false)}
+            <div ref={contentRef}>{renderDoc(preserveScroll ? shown ?? file : file, false)}</div>
             {incoming && renderDoc(incoming, true)}
           </>
         )}

@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import clsx from "clsx";
 import { useApp } from "@/lib/state/app-state";
 import { CAPABILITY_REGISTRY } from "@/lib/capabilities/registry";
+import { TOOL_GROUPS, TOP_TOOLS } from "@/lib/capabilities/groups";
 import { WorkspaceHeader } from "@/components/shell/WorkspaceHeader";
 import dynamic from 'next/dynamic';
 
@@ -115,7 +116,7 @@ const INITIAL_FORM: FormState = {
 };
 
 export function Workspace() {
-  const { activeCapabilityId, setWorkspaceActive } = useApp();
+  const { activeCapabilityId, setActiveCapabilityId, setWorkspaceActive } = useApp();
   // Ownership: `items` = the uploaded collection; `activeFileId` = which one single-document tools/viewer use;
   // `results` = accumulated outputs. Tools read these; only explicit user actions remove entries.
   const [items, setItems] = useState<WorkspaceFile[]>([]);
@@ -135,6 +136,7 @@ export function Workspace() {
   const [isMetadataOpen, setIsMetadataOpen] = useState(false);
   // Phone layout: Files / outputs / tool options live in a slide-up sheet instead of a side column.
   const [editPage, setEditPage] = useState(0);
+  const [editPagesOpen, setEditPagesOpen] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pendingPasswordFile, setPendingPasswordFile] = useState<File | null>(null);
   const [dismissedLargeFiles, setDismissedLargeFiles] = useState<Set<string>>(new Set());
@@ -143,8 +145,12 @@ export function Workspace() {
   const [dragFileId, setDragFileId] = useState<string | null>(null);
   const [dragOverFileId, setDragOverFileId] = useState<string | null>(null);
 
-  // Default to pdf.merge if none selected
+  // No tool chosen yet: drop a file first, then pick what to do with it (the start screen).
+  const choosing = !activeCapabilityId;
   const activeId = activeCapabilityId || "pdf.merge";
+  // Outputs of the latest run, shown on the page with a download and "do more with this file" next steps.
+  const [lastOutputs, setLastOutputs] = useState<StudioResult[] | null>(null);
+  useEffect(() => { setLastOutputs(null); }, [activeCapabilityId]);
   const capability = CAPABILITY_REGISTRY[activeId];
 
   // Map capability ID to old PdfToolId for the operations
@@ -246,6 +252,16 @@ export function Workspace() {
   /** Edits replace the bytes of an entry but keep its id, position and active state. */
   function replaceFile(id: string, file: File) {
     setItems((cur) => swapFile(cur, id, file));
+  }
+
+  /** Next step on a result: add it to Files (the original stays), make it active and open the chosen tool. */
+  function continueWith(res: StudioResult, capabilityId: string) {
+    const file = new File([res.bytes as BlobPart], res.filename, { type: "application/pdf" });
+    const r = addFiles(items, [file], () => `f${nextId.current++}`);
+    if (r.added.length) { setItems(r.items); setActiveFileId(r.added[0].id); }
+    setActiveCapabilityId(capabilityId);
+    setStatus(capabilityId === "pdf.merge" ? `${res.filename} added. Add another PDF to merge it with.` : `Working on ${res.filename}`);
+    setStatusTone("neutral");
   }
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -369,6 +385,7 @@ export function Workspace() {
 
         const tagged = nextResults.map((r) => ({ ...r, sourceSize: activeFile?.size }));
         setResults((prev) => [...tagged, ...prev]);
+        setLastOutputs(tagged.length ? tagged : null);
         setStatus(
           doneMessage ??
             (nextResults.length === 1
@@ -396,7 +413,7 @@ export function Workspace() {
             {(
               <div className="w-full h-full flex flex-col relative bg-white">
                 {/* Compact Context Header */}
-                <div className={clsx("h-12 border-b border-slate-200 px-4 md:px-6 bg-white flex justify-between items-center shrink-0", activeTool === "edit" && "md:hidden")}>
+                {!choosing && <div className={clsx("h-12 border-b border-slate-200 px-4 md:px-6 bg-white flex justify-between items-center shrink-0", activeTool === "edit" && "md:hidden")}>
                   <div className="flex items-center gap-3">
                     <h2 className="text-xl font-display text-slate-900">{capability?.name}</h2>
                     <p className="text-xs text-slate-500 hidden md:block">{capability?.summary}</p>
@@ -446,7 +463,7 @@ export function Workspace() {
                       </button>
                     )}
                   </div>
-                </div>
+                </div>}
 
                 {status && (
                   <div className={clsx("md:hidden px-4 py-1.5 text-xs font-medium border-b border-slate-200 shrink-0", statusTone === "error" ? "text-red-600 bg-red-50" : statusTone === "success" ? "text-green-700 bg-green-50" : "text-slate-600 bg-slate-50")} role="status">{status}</div>
@@ -483,21 +500,26 @@ export function Workspace() {
 
                   <ErrorBoundary fallbackTitle="Document viewer encountered an issue" onReset={() => setStatus("Viewer refreshed.")}>
                     {/* Empty State / Dropzone */}
-                    {!files.length && activeTool !== "blank" && (
+                    {!files.length && (choosing || activeTool !== "blank") && (
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
                         <EmptyState
                           title="Drop a PDF file here"
-                          description="Or browse files from your computer to start editing and organizing."
+                          description={choosing ? "Then choose what to do with it. Your file stays on your device; nothing is uploaded." : "Or browse files from your computer to start editing and organizing."}
                           actionLabel="Choose a file"
                           onAction={openFilePicker}
                         />
                       </div>
                     )}
 
+                    {/* Start screen: the file is here, now pick what to do */}
+                    {choosing && files.length > 0 && (
+                      <ToolChooser fileName={activeFile.name} count={files.length} onPick={(id) => { setActiveCapabilityId(id); setStatus(""); }} onAddMore={openFilePicker} />
+                    )}
+
                     {/* Edit Tool Integration */}
-                    {files.length > 0 && activeTool === "edit" && (
+                    {!choosing && files.length > 0 && activeTool === "edit" && (
                       <div className="flex-1 flex overflow-hidden">
-                        <div className="hidden md:flex">
+                        <div className={editPagesOpen ? "hidden md:flex" : "hidden"}>
                           <PageThumbnailSidebar
                             file={activeFile}
                             activePageIndex={editPage}
@@ -515,13 +537,13 @@ export function Workspace() {
                           />
                         </div>
                         <div className="flex-1 min-w-0 overflow-hidden">
-                       <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} />
+                       <EditorController key={active.id} file={activeFile} onFileModified={(f) => replaceFile(active.id, f)} pagesOpen={editPagesOpen} onTogglePages={() => setEditPagesOpen((o) => !o)} />
                         </div>
                       </div>
                     )}
 
                     {/* PDF Viewer with Page Thumbnails Sidebar */}
-                    {files.length > 0 && activeTool !== "blank" && activeTool !== "edit" && (
+                    {!choosing && files.length > 0 && activeTool !== "blank" && activeTool !== "edit" && (
                       <div className="flex-1 flex overflow-hidden">
                         <div className="hidden md:flex">
                         <PageThumbnailSidebar
@@ -556,7 +578,7 @@ export function Workspace() {
                     )}
                     
                     {/* Blank PDF View Placeholder */}
-                    {activeTool === "blank" && (
+                    {!choosing && activeTool === "blank" && (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <div 
                           className="bg-white shadow-md border border-slate-200" 
@@ -569,6 +591,11 @@ export function Workspace() {
                       </div>
                     )}
                   </ErrorBoundary>
+
+                  {/* Result: download right here, then carry on with the same file without uploading again */}
+                  {lastOutputs && !choosing && (
+                    <ResultCard outputs={lastOutputs} currentTool={activeId} onClose={() => setLastOutputs(null)} onNext={(id) => continueWith(lastOutputs[0], id)} />
+                  )}
                 </div>
               </div>
             )}
@@ -740,7 +767,7 @@ export function Workspace() {
             </div>
 
             {/* CONFIGURATION SECTION */}
-            {(files.length > 0 || activeTool === "blank") && activeTool !== "merge" && activeTool !== "edit" && (
+            {!choosing && (files.length > 0 || activeTool === "blank") && activeTool !== "merge" && activeTool !== "edit" && (
               <div className="mt-8 border-t border-slate-100 pt-6">
                 <div className="mb-6 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Configuration</h3>
@@ -783,6 +810,98 @@ export function Workspace() {
           onClose={() => setIsMetadataOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+const NEXT_STEPS: { id: string; label: string }[] = [
+  { id: "pdf.edit", label: "Edit" },
+  { id: "pdf.sign", label: "Sign" },
+  { id: "pdf.compress", label: "Compress" },
+  { id: "pdf.merge", label: "Merge with another" },
+];
+
+/** Shown over the page after a run: download, and the most likely next steps on the new file. */
+function ResultCard({ outputs, currentTool, onClose, onNext }: {
+  outputs: StudioResult[]; currentTool: string; onClose: () => void; onNext: (capabilityId: string) => void;
+}) {
+  const one = outputs.length === 1 ? outputs[0] : null;
+  const isPdf = !!one && /\.pdf$/i.test(one.filename);
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(2) + " MB";
+  return (
+    <div role="status" className="absolute bottom-4 inset-x-3 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-[34rem] z-[65] bg-white border border-green-200 rounded-xl shadow-xl p-3">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 w-6 h-6 shrink-0 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-sm" aria-hidden>✓</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-900 truncate" title={one?.filename}>{one ? one.filename : `${outputs.length} files ready`}</p>
+          <p className="text-xs text-slate-500">{one ? `Ready · ${mb(one.bytes.length)}${one.sourceSize && one.bytes.length < one.sourceSize ? ` (was ${mb(one.sourceSize)})` : ""}` : "Each one is also listed under Outputs."}</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-700 p-1 -m-1">✕</button>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => outputs.forEach((o) => downloadBytes(o.bytes, o.filename))}
+          className="px-4 py-2 rounded-md text-sm font-semibold bg-layah-primary text-white hover:bg-blue-600">
+          {one ? "Download" : `Download all (${outputs.length})`}
+        </button>
+        {isPdf && <>
+          <span className="text-xs text-slate-500 ml-1">Do more with this file:</span>
+          {NEXT_STEPS.filter((n) => n.id !== currentTool).map((n) => (
+            <button key={n.id} type="button" onClick={() => onNext(n.id)}
+              className="px-3 py-2 rounded-md text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50">{n.label}</button>
+          ))}
+        </>}
+      </div>
+    </div>
+  );
+}
+
+/** Start screen once a file is in: six big, common actions; everything else under "More tools". */
+function ToolChooser({ fileName, count, onPick, onAddMore }: { fileName: string; count: number; onPick: (id: string) => void; onAddMore: () => void }) {
+  const [more, setMore] = useState(false);
+  const top = new Set(TOP_TOOLS.map((t) => t.id));
+  return (
+    <div className="absolute inset-0 overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-4 py-6 md:py-10">
+        <p className="text-xs text-slate-500 truncate">{count > 1 ? `${count} files · working on ` : ""}<span className="font-medium text-slate-700">{fileName}</span></p>
+        <h2 className="text-2xl md:text-3xl font-display text-slate-900 mt-1 mb-5">What do you want to do?</h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {TOP_TOOLS.map((t) => (
+            <button key={t.id} type="button" onClick={() => onPick(t.id)}
+              className="text-left bg-white border border-slate-200 rounded-xl p-4 min-h-[7rem] hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+              <svg className="w-7 h-7 text-layah-primary mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d={t.icon} /></svg>
+              <span className="block text-base font-semibold text-slate-900">{t.label}</span>
+              <span className="block text-xs text-slate-500 mt-0.5">{t.hint}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more}
+            className="px-4 py-2 rounded-md text-sm font-medium border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
+            {more ? "Fewer tools" : "More tools"}
+          </button>
+          <button type="button" onClick={onAddMore} className="px-4 py-2 rounded-md text-sm font-medium text-layah-primary hover:bg-blue-50">+ Add more PDFs</button>
+        </div>
+        {more && (
+          <div className="mt-5 grid sm:grid-cols-2 gap-x-6 gap-y-4">
+            {TOOL_GROUPS.map((g) => {
+              const rest = g.items.filter((c) => !top.has(c.id));
+              if (!rest.length) return null;
+              return (
+                <div key={g.id}>
+                  <div className="text-xs font-bold tracking-widest uppercase text-slate-400 mb-1">{g.title}</div>
+                  {rest.map((c) => (
+                    <button key={c.id} type="button" onClick={() => onPick(c.id)} className="w-full text-left px-2 py-2 rounded-md hover:bg-white">
+                      <span className="block text-sm font-medium text-slate-800">{c.name}</span>
+                      <span className="block text-xs text-slate-500">{c.summary}</span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-6 text-xs text-slate-500">🔒 Everything happens on your device. Your files are never uploaded.</p>
+      </div>
     </div>
   );
 }

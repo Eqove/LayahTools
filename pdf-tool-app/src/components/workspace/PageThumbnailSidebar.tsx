@@ -1,8 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Document, Page } from "react-pdf";
+import { Document, Page, pdfjs } from "react-pdf";
 import { rotateSinglePage, deleteSinglePage, extractSinglePage } from "@/lib/pdf/page-actions";
+
+// Same worker as PdfViewer: the thumbnails can mount before the viewer has loaded.
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PageThumbnailSidebarProps {
   file: File;
