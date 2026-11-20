@@ -15,6 +15,9 @@ const PdfViewer = dynamic(
 import { RedactOverlay } from "@/components/pdf/interactive/RedactOverlay";
 import { SignOverlay } from "@/components/pdf/interactive/SignOverlay";
 import { SignaturePicker } from "@/components/workspace/SignaturePicker";
+import { TOOL_COPY } from "@/components/workspace/tool-copy";
+import { LockIcon } from "@/components/shell/LockIcon";
+import { isLocked } from "@/lib/capabilities/groups";
 
 const EditorController = dynamic(
   () => import('@/components/pdf/interactive/EditorController').then((mod) => mod.EditorController),
@@ -403,6 +406,7 @@ export function Workspace() {
   // Page thumbnails: desktop side panel and phone overlay share these. Only the one that fits the screen is mounted
   // (a CSS-hidden copy would still load and render every page). null = not known yet (server render): mount neither.
   const [phone, setPhone] = useState<boolean | null>(null);
+  const [signCardClosed, setSignCardClosed] = useState(false); // the add-signature card over the page; the side panel still has the picker
   useEffect(() => {
     const q = window.matchMedia("(max-width: 767px)");
     const sync = () => setPhone(q.matches);
@@ -410,6 +414,11 @@ export function Workspace() {
     q.addEventListener("change", sync);
     return () => q.removeEventListener("change", sync);
   }, []);
+
+  // Per-tool wording. The Options block (top of the phone sheet) carries its own Done button; on phones, inline tools
+  // show their setting under the header instead, so the sheet has no Options block for them.
+  const copy = TOOL_COPY[activeTool];
+  const hasOptions = !choosing && (files.length > 0 || activeTool === "blank") && activeTool !== "merge" && activeTool !== "edit" && !(phone && copy.inline);
 
   // Page thumbnails: props shared by both.
   const thumbProps = {
@@ -455,9 +464,13 @@ export function Workspace() {
                     <button
                       type="button"
                       onClick={() => setSheetOpen(true)}
-                      className="md:hidden px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 text-slate-700 bg-white"
+                      className={clsx("md:hidden px-3 py-1.5 rounded-md text-sm font-medium border", activeTool === "sign" && !form.signatureDataUrl ? "border-blue-300 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-700 bg-white")}
                     >
-                      Files &amp; options{items.length + results.length > 0 ? ` (${items.length + results.length})` : ""}
+                      {activeTool === "sign"
+                        ? (form.signatureDataUrl ? "Signature ✓" : "Add signature")
+                        : copy.inline || activeTool === "edit"
+                        ? `Files${items.length + results.length > 0 ? ` (${items.length + results.length})` : ""}`
+                        : copy.heading}
                     </button>
                     {activeTool !== "edit" && (
                       <button 
@@ -482,11 +495,18 @@ export function Workspace() {
                         }
                         className="px-5 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm shrink-0 bg-layah-primary text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isPending ? "Processing..." : "Run Tool"}
+                        {isPending ? "Processing..." : copy.run}
                       </button>
                     )}
                   </div>
                 </div>}
+
+                {/* Phones: the tool's own setting (or one-line hint) on screen, not hidden in the Files sheet */}
+                {!choosing && files.length > 0 && copy.inline && (
+                  <div className="md:hidden px-4 py-2 border-b border-slate-200 bg-white shrink-0 [&_label]:mb-0">
+                    <ToolFields activeTool={activeTool} form={form} updateForm={updateForm} compact />
+                  </div>
+                )}
 
                 {status && (
                   <div className={clsx("md:hidden px-4 py-1.5 text-xs font-medium border-b border-slate-200 shrink-0", statusTone === "error" ? "text-red-600 bg-red-50" : statusTone === "success" ? "text-green-700 bg-green-50" : "text-slate-600 bg-slate-50")} role="status">{status}</div>
@@ -572,9 +592,11 @@ export function Workspace() {
                             }}
                           />
                           {/* Sign: ask for the signature right on the document, not only in the side panel */}
-                          {activeTool === "sign" && !form.signatureDataUrl && (
-                            <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px] overflow-y-auto">
-                              <SignaturePicker variant="card" value={null} onChange={(url) => updateForm("signatureDataUrl", url)} />
+                          {activeTool === "sign" && !form.signatureDataUrl && !signCardClosed && (
+                            <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px] overflow-y-auto" onClick={() => setSignCardClosed(true)}>
+                              <div onClick={(e) => e.stopPropagation()} className="w-full flex justify-center">
+                                <SignaturePicker variant="card" value={null} onChange={(url) => updateForm("signatureDataUrl", url)} onClose={() => setSignCardClosed(true)} />
+                              </div>
                             </div>
                           )}
                         </div>
@@ -612,7 +634,7 @@ export function Workspace() {
             
             <div className="mb-6 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Files</h3>
-              <button type="button" onClick={() => setSheetOpen(false)} className="md:hidden ml-auto mr-3 px-3 py-1 rounded-md text-sm font-medium bg-layah-primary text-white">Done</button>
+              <button type="button" onClick={() => setSheetOpen(false)} className={clsx("md:hidden ml-auto mr-3 px-3 py-1 rounded-md text-sm font-medium bg-layah-primary text-white", hasOptions && "hidden")}>Done</button>
               <button onClick={openFilePicker} className="text-layah-primary hover:text-blue-700 p-1" aria-label="Add files">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
               </button>
@@ -772,9 +794,10 @@ export function Workspace() {
 
             {/* CONFIGURATION SECTION */}
             {!choosing && (files.length > 0 || activeTool === "blank") && activeTool !== "merge" && activeTool !== "edit" && (
-              <div className="mt-8 border-t border-slate-100 pt-6">
+              <div className={clsx("mt-8 border-t border-slate-100 pt-6 max-md:order-first max-md:mt-0 max-md:mb-8 max-md:border-t-0 max-md:pt-0", copy.inline && "max-md:hidden")}>
                 <div className="mb-6 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Configuration</h3>
+                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">{copy.heading}</h3>
+                  <button type="button" onClick={() => setSheetOpen(false)} className="md:hidden px-3 py-1 rounded-md text-sm font-medium bg-layah-primary text-white">Done</button>
                 </div>
                 <div className="flex flex-col gap-4">
                   {activeTool === "ocr" ? (
@@ -787,7 +810,7 @@ export function Workspace() {
                     <ToolFields
                       activeTool={activeTool}
                       form={form}
-                      updateForm={updateForm}
+                      updateForm={(key, value) => { updateForm(key, value); if (key === "signatureDataUrl" && value) setSheetOpen(false); }}
                       onOpenMetadata={() => setIsMetadataOpen(true)}
                     />
                   )}
@@ -895,7 +918,7 @@ function ToolChooser({ fileName, count, onPick, onAddMore }: { fileName: string;
                   <div className="text-xs font-bold tracking-widest uppercase text-slate-400 mb-1">{g.title}</div>
                   {rest.map((c) => (
                     <button key={c.id} type="button" onClick={() => onPick(c.id)} className="w-full text-left px-2 py-2 rounded-md hover:bg-white">
-                      <span className="block text-sm font-medium text-slate-800">{c.name}</span>
+                      <span className="flex items-center justify-between gap-2 text-sm font-medium text-slate-800">{c.name}{isLocked(c) && <LockIcon />}</span>
                       <span className="block text-xs text-slate-500">{c.summary}</span>
                     </button>
                   ))}
@@ -916,11 +939,14 @@ function ToolFields({
   form,
   updateForm,
   onOpenMetadata,
+  compact = false,
 }: {
   activeTool: PdfToolId;
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   onOpenMetadata?: () => void;
+  /** Phone strip under the header: leave out long notes. */
+  compact?: boolean;
 }) {
   const inputClass = "w-full border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1";
   const labelClass = "block text-sm font-medium text-slate-700 mb-3";
@@ -953,11 +979,11 @@ function ToolFields({
   if (activeTool === "rotate") {
     return (
       <label className={labelClass}>
-        Rotation Angle
+        Turn pages by
         <select className={inputClass} value={form.rotateAngle} onChange={(e) => updateForm("rotateAngle", e.target.value)}>
-          <option value="90">90 degrees</option>
-          <option value="180">180 degrees</option>
-          <option value="270">270 degrees</option>
+          <option value="90">90° right</option>
+          <option value="180">180° (upside down)</option>
+          <option value="270">90° left</option>
         </select>
       </label>
     );
@@ -975,7 +1001,7 @@ function ToolFields({
   if (activeTool === "page-numbers") {
     return (
       <label className={labelClass}>
-        Number Prefix
+        Text before the number
         <input className={inputClass} placeholder="e.g. Page" value={form.pageNumberPrefix} onChange={(e) => updateForm("pageNumberPrefix", e.target.value)} />
       </label>
     );
@@ -984,8 +1010,8 @@ function ToolFields({
   if (activeTool === "merge") {
     return (
       <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 p-3 rounded-md">
-        <strong className="block mb-1">File order determines merge order.</strong>
-        Drag the files in the Files panel (right sidebar) to set the order before running.
+        <strong className="block mb-1">Files are joined in the order shown under Files.</strong>
+        {compact ? "Tap Files to change the order." : "Drag the files in the Files panel to set the order before running."}
       </div>
     );
   }
@@ -1033,9 +1059,9 @@ function ToolFields({
             <option value="strong">Strong (Smallest Size)</option>
           </select>
         </label>
-        <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 p-3 rounded-md">
+        {!compact && <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 p-3 rounded-md">
           Note: V1 Compression attempts structural reduction via pdf-lib. True image downsampling requires backend processing.
-        </div>
+        </div>}
       </div>
     );
   }
@@ -1043,7 +1069,7 @@ function ToolFields({
   if (activeTool === "pdf-to-image") {
     return (
       <label className={labelClass}>
-        Image Format
+        Save pages as
         <select className={inputClass} value={form.imageFormat} onChange={(e) => updateForm("imageFormat", e.target.value as any)}>
           <option value="jpeg">JPEG (Smaller file size)</option>
           <option value="png">PNG (Lossless quality)</option>

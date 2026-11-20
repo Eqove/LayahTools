@@ -16,7 +16,8 @@ interface EditorControllerProps {
   onTogglePages?: () => void;
 }
 
-type Tool = "select" | "hand" | "text" | "image" | "whiteout" | "shape";
+// "view" = read-only: pressing Select again turns selection off; nothing can be hovered, selected or moved.
+type Tool = "select" | "view" | "hand" | "text" | "image" | "whiteout" | "shape";
 type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
 const SHAPES: { id: ShapeKind; label: string }[] = [
   { id: "rect", label: "Rectangle" },
@@ -49,6 +50,7 @@ const Icon = ({ name }: { name: string }) => (
   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden><path d={ICONS[name]} /></svg>
 );
 const HINTS: Record<Tool, string> = {
+  view: "Read-only: nothing can be selected or changed. Press Select to edit again.",
   select: "Select a line to edit, resize, recolour or delete it · drag to move",
   hand: "Drag to move around the page. Choose Select to edit again.",
   text: "Click on the page where the text should go.",
@@ -322,6 +324,8 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
 
+      if (tool === "view") return; // read-only: no select-all, nudge, delete or Escape-to-select
+
       // Select all on current page
       if (mod && e.key.toLowerCase() === "a") {
         e.preventDefault();
@@ -367,7 +371,7 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [machine, status, busy, undo, redo, deleteSelection, sync, run]);
+  }, [machine, status, busy, tool, undo, redo, deleteSelection, sync, run]);
 
   // ---- toolbar actions ---------------------------------------------------------------------
   const selected = editorState.selectedObjectIds;
@@ -517,7 +521,7 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
   const seg = (active: boolean) => `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border-r border-slate-200 last:border-r-0 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${active ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`;
   const textRunOnly = !!singleRun;
   const modes: [Tool, string, string][] = [
-    ["select", "Select", "Select, move and edit what is already on the page"],
+    ["select", "Select", "Select, move and edit what is already on the page. Press again for read-only."],
     ["hand", "Hand", "Drag to pan the page (or hold Space, or drag with the middle button)"],
     ["text", "Text", "Add new text"],
     ["image", "Image", "Add an image from your computer"],
@@ -525,6 +529,7 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
   ];
   const pickMode = (t: Tool) => {
     setPlacement(null); setEditing(null);
+    if (t === "select" && tool === "select") t = "view"; // Select is a toggle: pressed again = read-only
     // Only the chosen tool is live: leaving Select drops the current selection so nothing else stays active.
     if (t !== "select") { machine.reset(); sync(); }
     if (t === "image") { fileInput.current?.click(); return; }
@@ -729,7 +734,8 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
             <p className="mt-3 text-xs text-slate-500">Drag on the page with one finger to draw. Use two fingers to scroll or zoom.</p>
           </div>
         )}
-        <nav aria-label="Edit tools" className="grid grid-cols-7">
+        <nav aria-label="Edit tools" className="flex">
+          {/* One equal-width row for every button, however many there are (8 today). */}
           {[
             ...modes.map(([t, label]) => ({ key: t, label, icon: t as string, active: tool === t, disabled: !!busy, onClick: () => pickMode(t) })),
             { key: "shape", label: "Shapes", icon: shapeKind as string, active: tool === "shape", disabled: !!busy, onClick: () => { pickMode("shape"); setShapeMenu(true); } },
@@ -737,8 +743,8 @@ export function EditorController({ file, onFileModified, pagesOpen = true, onTog
             { key: "redo", label: "Redo", icon: "redo", active: false, disabled: !!busy || !session.canRedo, onClick: redo },
           ].map(b => (
             <button key={b.key} type="button" onClick={b.onClick} disabled={b.disabled} aria-pressed={b.key === "undo" || b.key === "redo" ? undefined : b.active}
-              className={`min-h-[56px] flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40 ${b.active ? "text-blue-700 bg-blue-50" : "text-slate-600 active:bg-slate-100"}`}>
-              <Icon name={b.icon as keyof typeof ICONS} />{b.label}
+              className={`flex-1 min-w-0 min-h-[56px] flex flex-col items-center justify-center gap-1 text-[10px] leading-tight tracking-tight font-medium disabled:opacity-40 ${b.active ? "text-blue-700 bg-blue-50" : "text-slate-600 active:bg-slate-100"}`}>
+              <Icon name={b.icon as keyof typeof ICONS} /><span className="max-w-full truncate">{b.label}</span>
             </button>
           ))}
         </nav>
@@ -801,7 +807,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
 
   // All gesture decisions live in lib/document/gestures.ts; this component only translates DOM events.
   const onPointerDown = (e: React.PointerEvent) => {
-    if (disabled || tool === "hand") return; // the viewer pans; nothing on the page is picked
+    if (disabled || tool === "hand" || tool === "view") return; // the viewer pans / read-only; nothing on the page is picked
     if (e.pointerType === "touch") {
       activeTouches.add(e.pointerId);
       if (activeTouches.size > 1) { cancelled.current = true; onPointerAbort(); return; }
@@ -917,7 +923,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
           ? editorState.phase === "dragging"
             ? "cursor-grabbing"
             : hover ? (editorState.selectedObjectIds.includes(hover.id) ? "cursor-move" : "cursor-pointer") : "cursor-default"
-          : "cursor-crosshair"
+          : tool === "view" ? "cursor-default" : "cursor-crosshair"
       }`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -932,7 +938,7 @@ function EditorPageOverlay({ pageIndex, session, rev, machine, editorState, sync
         groupSelectionBounds={group}
         phase={editorState.phase}
         selectionBox={box}
-        hoverBounds={hover && !editorState.selectedObjectIds.includes(hover.id) ? pdfToViewportBounds(hover.bounds, ctx) : null}
+        hoverBounds={tool === "select" && hover && !editorState.selectedObjectIds.includes(hover.id) ? pdfToViewportBounds(hover.bounds, ctx) : null}
         dragDeltaPt={dragPt}
       />
       {marker && <div className="absolute bg-blue-600 pointer-events-none" style={{ left: marker.left, top: marker.top, width: 2, height: marker.bottom - marker.top }} />}

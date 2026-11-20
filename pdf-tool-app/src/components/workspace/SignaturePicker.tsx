@@ -9,6 +9,8 @@ interface SignaturePickerProps {
   onClearPlaced?: () => void;
   /** "card": the big first-run card shown over the document. "panel": the side configuration panel. */
   variant?: "panel" | "card";
+  /** Card only: shows a close button. */
+  onClose?: () => void;
 }
 
 type Mode = "upload" | "draw" | "type";
@@ -51,7 +53,7 @@ async function toSignaturePng(src: string, clearPaper: boolean): Promise<string>
 
 const INK = ["#0f172a", "#1d4ed8", "#b91c1c"];
 
-export function SignaturePicker({ value, onChange, placedCount = 0, onClearPlaced, variant = "panel" }: SignaturePickerProps) {
+export function SignaturePicker({ value, onChange, placedCount = 0, onClearPlaced, variant = "panel", onClose }: SignaturePickerProps) {
   const [mode, setMode] = useState<Mode>("upload");
   const [clearPaper, setClearPaper] = useState(true);
   const [dragOver, setDragOver] = useState(false);
@@ -60,6 +62,12 @@ export function SignaturePicker({ value, onChange, placedCount = 0, onClearPlace
   const [ink, setInk] = useState(INK[0]);
   const fileRef = useRef<HTMLInputElement>(null);
   const card = variant === "card";
+  useEffect(() => {
+    if (!card || !onClose) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [card, onClose]);
 
   const fromFile = async (file: File | undefined) => {
     if (!file) return;
@@ -154,7 +162,7 @@ export function SignaturePicker({ value, onChange, placedCount = 0, onClearPlace
         </div>
         <ol className="text-sm text-slate-700 bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-1.5">
           <li><b>1.</b> Click anywhere on a page to place it.</li>
-          <li><b>2.</b> Drag it to move it; the × removes it.</li>
+          <li><b>2.</b> Drag it to move it. Drag a corner dot to resize.</li>
           <li><b>3.</b> Press <b>Run Tool</b> to save the signed PDF.</li>
         </ol>
         {placedCount > 0 && (
@@ -169,8 +177,14 @@ export function SignaturePicker({ value, onChange, placedCount = 0, onClearPlace
 
   // ---- add a signature ----
   return (
-    <div className={`flex flex-col gap-3 ${card ? "w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-5" : ""}`}>
-      <div>
+    <div className={`relative flex flex-col gap-3 ${card ? "w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-5" : ""}`}>
+      {card && onClose && (
+        <button type="button" onClick={onClose} aria-label="Close" title="Close (Esc)"
+          className="absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      )}
+      <div className={card ? "pr-10" : ""}>
         <div className={`${card ? "text-lg" : "text-sm"} font-semibold text-slate-900`}>Add your signature</div>
         <div className="text-sm text-slate-500">Upload a picture, draw it, or type your name.</div>
       </div>
@@ -199,7 +213,7 @@ export function SignaturePicker({ value, onChange, placedCount = 0, onClearPlace
               </svg>
             </span>
             <span className="text-sm font-semibold text-slate-800">Upload signature image</span>
-            <span className="text-xs text-slate-500">Click to choose, or drag a file here · PNG, JPG or a photo</span>
+            <span className="text-xs text-slate-500">Tap to choose<span className="hidden md:inline">, or drag a file here</span> · PNG, JPG or a photo</span>
           </button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { fromFile(e.target.files?.[0]); e.target.value = ""; }} />
           <label className="flex items-start gap-2 text-sm text-slate-600 cursor-pointer">

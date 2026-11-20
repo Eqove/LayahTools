@@ -4,7 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import clsx from "clsx";
 import { useApp } from "@/lib/state/app-state";
 import { CAPABILITY_REGISTRY } from "@/lib/capabilities/registry";
-import { TOOL_GROUPS, searchTools } from "@/lib/capabilities/groups";
+import { TOOL_GROUPS, searchTools, isLocked } from "@/lib/capabilities/groups";
+import { LockIcon } from "@/components/shell/LockIcon";
 import { ShortcutModal } from "@/components/shell/ShortcutModal";
 import { useInstallPrompt } from "@/components/shell/Pwa";
 
@@ -44,7 +45,7 @@ function ToolSearch({ onPick, className, autoFocus }: { onPick: (id: string) => 
             <button key={c.id} type="button" role="option" aria-selected={i === hi}
               onMouseDown={(e) => e.preventDefault()} onClick={() => pick(c.id)} onMouseEnter={() => setHi(i)}
               className={clsx("w-full text-left px-3 py-2", i === hi ? "bg-blue-50" : "")}>
-              <span className="block text-sm font-medium text-slate-900">{c.name}</span>
+              <span className="flex items-center justify-between gap-2 text-sm font-medium text-slate-900">{c.name}{isLocked(c) && <LockIcon />}</span>
               <span className="block text-xs text-slate-500 truncate">{c.summary}</span>
             </button>
           )) : <p className="px-3 py-2 text-sm text-slate-500">No tool matches “{q.trim()}”.</p>}
@@ -145,11 +146,11 @@ export function WorkspaceHeader({ goHome, onSelectTool }: { goHome: () => void; 
                           title={cap.summary}
                           onClick={() => choose(cap.id)}
                           className={clsx(
-                            "w-full text-left px-3 py-1.5 text-sm",
+                            "w-full text-left px-3 py-1.5 text-sm flex items-center justify-between gap-2",
                             cap.id === activeId ? "bg-blue-50 text-layah-primary font-medium" : "text-slate-700 hover:bg-slate-50"
                           )}
                         >
-                          {cap.name}
+                          {cap.name}{isLocked(cap) && <LockIcon />}
                         </button>
                       ))}
                     </div>
@@ -185,9 +186,9 @@ export function WorkspaceHeader({ goHome, onSelectTool }: { goHome: () => void; 
                         key={cap.id}
                         role="menuitem"
                         onClick={() => choose(cap.id)}
-                        className={clsx("w-full text-left px-3 py-2.5 rounded-md text-base", cap.id === activeId ? "bg-blue-50 text-layah-primary font-medium" : "text-slate-700")}
+                        className={clsx("w-full text-left px-3 py-2.5 rounded-md text-base flex items-center justify-between gap-2", cap.id === activeId ? "bg-blue-50 text-layah-primary font-medium" : "text-slate-700")}
                       >
-                        {cap.name}
+                        {cap.name}{isLocked(cap) && <LockIcon className="w-4 h-4" />}
                       </button>
                     ))}
                   </div>

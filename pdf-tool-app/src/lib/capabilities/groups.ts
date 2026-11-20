@@ -2,6 +2,9 @@
 import { CAPABILITY_REGISTRY } from "./registry";
 import type { Capability } from "./types";
 
+/** Tools shown with a padlock in menus, search and the start screen. Label only: they still open. Edit here. */
+export const isLocked = (c: Capability) => c.category === "understand";
+
 export const TOOL_GROUPS = [
   { id: "organize", title: "Organize pages" },
   { id: "create", title: "Create & edit" },
